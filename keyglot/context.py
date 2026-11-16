@@ -156,7 +156,7 @@ class ContextProvider:
         fi.before = self._text_before(el)
         key = (hwnd, fi.title)
         cached = self._conv_cache.get(key)
-        if cached and time.time() - cached[0] < 20:
+        if cached and time.time() - cached[0] < 60:
             fi.visible = cached[1]
         else:
             fi.visible = self._visible_text(el)
@@ -192,7 +192,9 @@ class ContextProvider:
         return ""
 
     def _visible_text(self, el):
-        """Visible text of the nearest document around the field (chat history, mail thread)."""
+        """Text of the nearest document just before the field (chat history, mail thread), up to 3000 characters.
+        Never GetVisibleRanges: Chromium computes it for the whole page (2+ s on a chat), and while it answers,
+        its window does not draw the letters being typed. Moving a range back from the field takes ~50 ms."""
         UIA = self._UIA
         walker = self._uia.ControlViewWalker
         node = el
@@ -201,18 +203,30 @@ class ContextProvider:
                 if node.CurrentControlType == 50030:  # Document
                     tp = self._pattern(node, 10014, UIA.IUIAutomationTextPattern)
                     if tp:
-                        ranges = tp.GetVisibleRanges()
-                        parts = []
-                        for i in range(min(ranges.Length, 40)):
-                            parts.append(ranges.GetElement(i).GetText(2000) or "")
-                            if sum(map(len, parts)) > 5000:
-                                break
-                        return "\n".join(parts)[-5000:]
+                        return self._text_back(tp, el)
                 node = walker.GetParentElement(node)
                 if not node:
                     break
             except Exception:
                 break
+        return ""
+
+    @staticmethod
+    def _text_back(tp, el):
+        for anchor in ("field", "end"):
+            try:
+                if anchor == "field":
+                    r = tp.RangeFromChild(el)
+                    r.MoveEndpointByRange(1, r, 0)  # End = Start: the text before the field
+                else:
+                    r = tp.DocumentRange
+                    r.MoveEndpointByRange(0, r, 1)  # Start = End
+                r.MoveEndpointByUnit(0, 0, -3000)   # Start, Character
+                text = r.GetText(4000) or ""
+                if len(text.strip()) > 20:
+                    return text[-3000:]
+            except Exception:
+                continue
         return ""
 
     # ----------------------------------------------------------- build ---

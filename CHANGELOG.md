@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 — 2026-11-16
+
+- Fix: typing in Edge, WhatsApp Web, CO Desktop and other Chromium/Electron windows lagged at the start of a phrase —
+  letters appeared only after a second or two. Keyglot read the visible conversation through UI Automation
+  (`GetVisibleRanges`), which Chromium answers in 2+ s on its UI thread, and the window did not draw the keys
+  meanwhile. Now it reads up to 3000 characters just before the field (or at the end of the document) in ~10–50 ms,
+  and keeps it for 60 s.
+
 ## 0.3.2 — 2026-11-16
 
 - The detailed input log writes one line per input instead of one per word. An input is what you type into one
