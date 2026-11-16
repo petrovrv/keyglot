@@ -29,6 +29,7 @@ class Runner:
         self.exe = ""
         self.last_hkl = None
         self.our_switch_hkl = None
+        self.expect = None            # (hwnd, hkl) we asked for: checked at the next word
         self.blocked_up = set()
         self.jobs = queue.Queue()
         self.dirty = False
@@ -61,6 +62,7 @@ class Runner:
         hkl = self.E.L.hkls.get(lang)
         if hkl:
             self.our_switch_hkl = hkl
+            self.expect = (hwnd, hkl)
             W.request_layout(hwnd, hkl)
 
     def event(self, **ev):
@@ -181,6 +183,11 @@ class Runner:
         active_group = LANG_GROUP.get(active_lang)
         user_switched = bool(self.last_hkl and hkl != self.last_hkl and hkl != self.our_switch_hkl)
         self.last_hkl = hkl
+        if self.expect and self.expect[0] == hwnd:
+            if hkl != self.expect[1]:
+                self.event(event="switch_missed", exe=self.exe, want=_hex(self.expect[1]), got=_hex(hkl),
+                           top=_hex(W.thread_hkl(hwnd)))
+            self.expect = None
         if self.nonword or not active_group:
             self.nonword = False
             self.prev = None
@@ -197,38 +204,68 @@ class Runner:
             self.last_hkl = self.our_switch_hkl
             self.event(event="switch", exe=ctx.exe, kind=ctx.kind, to=d["lang"], word=d.get("typed"))
             d["action"] = "keep"
+        lang = d.get("lang")
         if d["action"] != "rewrite":
-            lang = d.get("lang")
             if lang and d.get("known") and ctx.kind not in LATIN_KINDS:
                 self.E.learn(ctx, lang)
                 self.dirty = True
-            self.prev = {"keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk,
-                         "lang": lang or ctx.sticky, "t": time.time()}
-            return False
-
-        typed, new = d["typed"], d["text"]
-        n_back, out, orig, kids = len(typed), new, typed, [d["key_id"]]
+            typed = d.get("typed", "")
+            n_back, out, orig, kids, switch_to, reason = len(typed), typed, typed, [d.get("key_id", "")], None, ""
+        else:
+            typed, new = d["typed"], d["text"]
+            n_back, out, orig, kids, switch_to, reason = len(typed), new, typed, [d["key_id"]], d["lang"], d["reason"]
         p = self.prev
-        if p and p["hwnd"] == hwnd and p["boundary"] == W.VK_SPACE and time.time() - p["t"] < 30 \
-                and ctx.kind not in LATIN_KINDS:
+        prev_ok = bool(p and p["hwnd"] == hwnd and p["boundary"] == W.VK_SPACE and time.time() - p["t"] < 30
+                       and ctx.kind not in LATIN_KINDS)
+        if d["action"] == "rewrite" and prev_ok:
             r = self.E.recheck_previous(p["keys"], p["group"], d["lang"])
             if r:
                 n_back += len(r["typed"]) + 1
                 out = r["text"] + " " + new
                 orig = r["typed"] + " " + typed
                 kids.append(r["key_id"])
+                prev_ok = False
+        head, word = (out.rsplit(" ", 1) + [""])[:2] if " " in out else ("", out)
+        pol = None
+        if ctx.kind == "prose" and lang and d.get("reason") != "exception" and word and \
+                (self.cfg.get("fix_typos", True) or self.cfg.get("fix_yo", True) or self.cfg.get("fix_spaces", True)):
+            opts = {"typos": self.cfg.get("fix_typos", True), "yo": self.cfg.get("fix_yo", True),
+                    "spaces": self.cfg.get("fix_spaces", True)}
+            pr = p.get("raw") if prev_ok and p.get("raw") else None
+            pol = self.E.polish(word, lang, pr, opts, kid=kids[0], prev_kid=p.get("kid", "") if pr else "")
+        two = len(kids) > 1
+        if pol:
+            if pol["prev"] is not None:
+                n_back += len(p["shown"]) + 1
+                orig = p["shown"] + " " + orig
+                out = pol["prev"] + (" " + pol["text"] if pol["text"] else "")
+                kids = [f'{p.get("kid", "")} {kids[0]}']
+                two = True
+            else:
+                out = (head + " " if head else "") + pol["text"]
+            reason = (reason + "; " if reason else "") + pol["reason"]
+        if out == orig:
+            self.prev = {"keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk,
+                         "lang": lang or ctx.sticky, "t": time.time(), "raw": typed, "shown": typed,
+                         "kid": d.get("key_id", "")}
+            return False
+
         self.blocked_up.add(bvk)
-        self.jobs.put(("rewrite", hwnd, n_back, out, bvk, d["lang"]))
-        self.last_hkl = self.E.L.hkls.get(d["lang"])
-        self.E.learn(ctx, d["lang"])
+        self.jobs.put(("rewrite", hwnd, n_back, out, bvk, switch_to))
+        if switch_to:
+            self.last_hkl = self.E.L.hkls.get(switch_to)
+        self.E.learn(ctx, lang)
         self.dirty = True
-        self.event(event="fix", exe=ctx.exe, kind=ctx.kind, frm=orig, to=out, reason=d["reason"],
-                   doc=_top(ctx.doc), conv=_top(ctx.conv), key=ctx.key)
+        self.event(event="fix", exe=ctx.exe, kind=ctx.kind, frm=orig, to=out, reason=reason,
+                   doc=_top(ctx.doc), conv=_top(ctx.conv), key=ctx.key, hkl=_hex(hkl))
         self.last_corr = None if bvk == W.VK_RETURN else {
             "orig": orig, "new": out, "bvk": bvk, "hwnd": hwnd, "lang": active_lang, "kids": kids,
             "exe": ctx.exe, "kind": ctx.kind, "key": ctx.key}
-        self.prev = None if len(kids) > 1 else {
-            "keys": keys, "hwnd": hwnd, "group": d["group"], "boundary": bvk, "lang": d["lang"], "t": time.time()}
+        shown = out.rsplit(" ", 1)[-1]
+        self.prev = None if two else {
+            "keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk, "lang": lang,
+            "t": time.time(), "raw": new if d["action"] == "rewrite" else typed, "shown": shown,
+            "kid": kids[0]}
         return True
 
     def undo(self):
@@ -286,6 +323,7 @@ class Runner:
     # -------------------------------------------------------------- run ---
     def start(self):
         threading.Thread(target=self._worker, name="keyglot-worker", daemon=True).start()
+        threading.Thread(target=self.E.S.warm, name="keyglot-warm", daemon=True).start()
         threading.Thread(target=self._housekeeping, name="keyglot-house", daemon=True).start()
         ready = threading.Event()
         threading.Thread(target=self._hook_thread, args=(ready,), name="keyglot-hook", daemon=True).start()
@@ -346,6 +384,10 @@ def _mtime(path):
         return os.path.getmtime(path)
     except OSError:
         return 0
+
+
+def _hex(hkl):
+    return f"{(hkl or 0) & 0xFFFFFFFF:08x}"
 
 
 def _top(shares):

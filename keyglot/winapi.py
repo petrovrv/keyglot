@@ -60,6 +60,8 @@ user32.GetKeyboardLayout.restype = ctypes.c_void_p
 user32.GetKeyboardLayoutList.argtypes = [ctypes.c_int, ctypes.c_void_p]
 user32.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
 user32.SendInput.argtypes = [w.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+user32.GetAncestor.argtypes = [w.HWND, w.UINT]
+user32.GetAncestor.restype = w.HWND
 user32.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
 user32.GetGUIThreadInfo.argtypes = [w.DWORD, ctypes.POINTER(GUITHREADINFO)]
 user32.GetWindowLongW.argtypes = [w.HWND, ctypes.c_int]
@@ -114,8 +116,26 @@ def window_class(hwnd):
     return buf.value
 
 
+def input_focus():
+    """Window with the keyboard focus on the foreground thread (may belong to another thread than
+    the top-level window: Chromium/Electron apps keep input in a child of their own)."""
+    gi = GUITHREADINFO(cbSize=ctypes.sizeof(GUITHREADINFO))
+    if user32.GetGUIThreadInfo(0, ctypes.byref(gi)):
+        return gi.hwndFocus or gi.hwndActive
+    return None
+
+
+def thread_hkl(hwnd):
+    return user32.GetKeyboardLayout(user32.GetWindowThreadProcessId(hwnd, None))
+
+
 def window_hkl(hwnd):
-    tid = user32.GetWindowThreadProcessId(hwnd, None)
+    """Layout of the thread that really receives the keys of hwnd's window."""
+    f = input_focus()
+    if f and hwnd and user32.GetAncestor(f, 2) == hwnd:  # GA_ROOT
+        tid = user32.GetWindowThreadProcessId(f, None)
+    else:
+        tid = user32.GetWindowThreadProcessId(hwnd, None)
     return user32.GetKeyboardLayout(tid)
 
 
@@ -162,7 +182,13 @@ def _utf16_units(text):
 
 
 def request_layout(hwnd, hkl):
-    user32.PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, hkl)
+    """Ask the focused window and its top-level window to switch; either may be the one that acts."""
+    f = input_focus()
+    targets = [hwnd]
+    if f and f != hwnd and user32.GetAncestor(f, 2) == hwnd:
+        targets.insert(0, f)
+    for h in targets:
+        user32.PostMessageW(h, WM_INPUTLANGCHANGEREQUEST, 0, hkl)
 
 
 def single_instance(name):

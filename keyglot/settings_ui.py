@@ -74,7 +74,8 @@ class SettingsWindow:
     def _general(self, parent):
         f = ttk.Frame(parent, padding=14)
         self.vars = {}
-        for key in ("enabled", "correct_on_enter", "preswitch", "sound", "log_events"):
+        for key in ("enabled", "correct_on_enter", "fix_typos", "fix_yo", "fix_spaces", "preswitch", "sound",
+                    "log_events"):
             v = tk.BooleanVar(value=self.cfg.get(key, True))
             self.vars[key] = v
             ttk.Checkbutton(f, text=t(key), variable=v).pack(anchor="w", pady=2)

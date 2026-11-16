@@ -31,7 +31,7 @@ def main(argv=None):
 
     if a.explain:
         eng = Engine(Layouts(), LanguageModel())
-        print("->", simulate(eng, a.explain, a.layout, Ctx(kind=a.kind), verbose=True))
+        print("->", simulate(eng, a.explain, a.layout, Ctx(kind=a.kind), verbose=True, polish={}))
         return 0
 
     from . import winapi as W
@@ -67,6 +67,11 @@ def selfcheck():
             got = simulate(eng, "ghbdtn rfr ltkf", "lat")
             lines.append(f"decision: {got}")
             ok &= got == "привет как дела"
+        if "ru" in eng.L.tables:
+            t0 = time.time()
+            got = simulate(eng, "еще одна програама приветк ак", "ru", polish={})
+            lines.append(f"polish: {got} ({time.time() - t0:.2f}s)")
+            ok &= got == "ещё одна программа привет как"
         from .context import ContextProvider
         cp = ContextProvider(eng.lm, lambda: {})
         for _ in range(30):

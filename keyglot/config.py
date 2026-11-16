@@ -19,6 +19,9 @@ DEFAULTS = {
     "enabled": True,
     "correct_on_enter": True,
     "preswitch": True,
+    "fix_typos": True,          # typos in words already in the right layout
+    "fix_yo": True,             # еще -> ещё
+    "fix_spaces": True,         # приветк ак -> привет как, приветкак -> привет как
     "sound": True,
     "log_events": True,
     "updates": "auto",          # auto | notify | off

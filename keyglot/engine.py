@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from .layouts import GROUP_LANGS, LANG_GROUP, TRAIL_PUNCT_VKS
 from .lexicon import LANGS, TECH_WORDS, split_core, valid_core
+from .spell import Speller, match_case
 
 # Field kinds where text is mostly Latin: only Cyrillic garbage -> Latin is corrected there.
 LATIN_KINDS = {"terminal", "code", "path", "address"}
@@ -35,6 +36,7 @@ class Engine:
         self.state.setdefault("apps", {})
         self.state.setdefault("ctx", {})
         self.exceptions = set(self.state.setdefault("exceptions", []))
+        self.S = Speller(lm)
 
     # ------------------------------------------------------------ prior ---
     @staticmethod
@@ -129,6 +131,9 @@ class Engine:
         pr = self.prior(ctx, active_group)
         scored = sorted(((s + pr[lang], g, lang, text, core, s, known) for g, lang, text, core, s, known in cands),
                         reverse=True)
+        if split_core(typed)[1][:1] == typed[:1]:
+            # the word starts with a letter: never turn its first letters into punctuation ('эьл' -> "'mk")
+            scored = [c for c in scored if c[3] == typed or split_core(c[3])[0] == ""]
         res["cands"] = scored[:6]
         best = scored[0]
         if best[3] == typed:
@@ -206,6 +211,65 @@ class Engine:
             return {"typed": typed, "text": new, "key_id": kid}
         return None
 
+    # ----------------------------------------------- typos, ё, spaces ---
+    def polish(self, text, lang, prev_text=None, opts=None, kid="", prev_kid=""):
+        """After the layout decision: misplaced space with the previous word, missing space, typo, ё.
+        prev_text is the previous word as typed (before its own typo fix), so "приветк ак" is still seen.
+        Returns {"prev": new previous word or None, "text": new word, "reason": ...} or None."""
+        opts = opts or {}
+        if not text or lang not in LANG_GROUP or kid in self.exceptions:
+            return None
+        pre, core, post = split_core(text)
+        if not core or not core.isalpha() or (len(core) > 1 and core.isupper()) or \
+                any(c.isupper() for c in core[1:]):
+            return None  # abbreviations, iPhone-style names, words with digits or inner punctuation
+        low = core.lower()
+        group = LANG_GROUP[lang]
+        name_like = core[0].isupper() and prev_text and not prev_text.rstrip().endswith((".", "!", "?", "…"))
+        reason = []
+        new_prev, words = None, [low]
+        if opts.get("spaces", True) and prev_text and not pre and not name_like:
+            ppre, pcore, ppost = split_core(prev_text)
+            pair = f"{prev_kid} {kid}"
+            if pcore and pcore.isalpha() and not ppost and pair not in self.exceptions:
+                r = self.S.respace(pcore.lower(), low, lang)
+                if r:
+                    if len(r) == 1:
+                        new_prev, words = ppre + match_case(pcore, r[0]), None
+                    else:
+                        new_prev, words = ppre + match_case(pcore, r[0]), [r[1]]
+                    reason.append("space " + " ".join(r))
+        if new_prev is None and not name_like:
+            typo = self.S.correct(low, group, {lang: 0.3}) if opts.get("typos", True) else None
+            split = self.S.split(low, lang) if opts.get("spaces", True) else None
+            if typo and (typo[3] <= 0.8 or not split):
+                words = [typo[0]]
+                reason.append(typo[2])
+            elif split:
+                words = list(split)
+                reason.append("split " + " ".join(split))
+        if opts.get("yo", True) and lang == "ru":
+            if words:
+                for i, wd in enumerate(words):
+                    y = self.S.yo(wd)
+                    if y:
+                        words[i] = y
+                        reason.append("yo " + y)
+            if new_prev:
+                pp, pc, pq = split_core(new_prev)
+                y = self.S.yo(pc.lower())
+                if y:
+                    new_prev = pp + match_case(pc, y) + pq
+                    reason.append("yo " + y)
+        if not reason:
+            return None
+        out = ""
+        if words:
+            out = pre + " ".join([match_case(core, words[0])] + words[1:]) + post
+        elif new_prev:
+            new_prev += post
+        return {"prev": new_prev, "text": out, "reason": "; ".join(reason)}
+
     # --------------------------------------------------------- learning ---
     def learn(self, ctx, lang):
         if not lang:
@@ -241,10 +305,11 @@ class Engine:
         return None
 
 
-def simulate(engine, text, layout, ctx=None, verbose=False):
-    """Type text word by word as if layout were active (physical keys stay, layout may change)."""
+def simulate(engine, text, layout, ctx=None, verbose=False, polish=None):
+    """Type text word by word as if layout were active (physical keys stay, layout may change).
+    polish: None = layout only, or options for typos/ё/spaces ({} = all on)."""
     ctx = ctx or Ctx()
-    out, prev, active = [], None, layout
+    out, prev, active, raw = [], None, layout, None
     for word in text.split(" "):
         if not word:
             continue
@@ -268,4 +333,18 @@ def simulate(engine, text, layout, ctx=None, verbose=False):
         else:
             out.append(d.get("typed", word))
             prev = {"keys": keys, "lang": d.get("lang"), "group": active}
-    return " ".join(out)
+        cur_raw = out[-1]
+        if polish is not None and ctx.kind == "prose" and d.get("reason") != "exception" and prev["lang"]:
+            pt = raw if len(out) > 1 else None
+            p = engine.polish(out[-1], prev["lang"], pt, polish)
+            if verbose and p:
+                print(f"      polish: {p}")
+            if p:
+                if p["prev"] is not None:
+                    out[-2] = p["prev"]
+                    cur_raw = None  # both words were rebuilt: no third-word look-back
+                out[-1] = p["text"]
+                if not out[-1]:
+                    out.pop()
+        raw = cur_raw
+    return " ".join(w for w in out if w)

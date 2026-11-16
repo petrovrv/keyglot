@@ -91,3 +91,40 @@ def test_wordlist_lookup(eng):
     assert eng.lm.known("ghbdtn", "en") == 0
     shares, n = eng.lm.text_languages("Привет, как дела? Я сегодня дома.")
     assert n >= 4 and shares.get("ru", 0) > 0.7
+
+
+@pytest.mark.parametrize("text,layout,want", [
+    ("и еще хотелось бы", "ru", "и ещё хотелось бы"),
+    ("Еще одна програама", "ru", "Ещё одна программа"),
+    ("чтобые вместо", "ru", "чтобы вместо"),
+    ("приветк ак дела", "ru", "привет как дела"),
+    ("приве ткак дела", "ru", "привет как дела"),
+    ("приветкак дела", "ru", "привет как дела"),
+    ("ghbdtnr fr ltkf", "lat", "привет как дела"),
+    ("hello wrold", "lat", "hello world"),
+    ("goedemorgne", "lat", "goedemorgen"),
+    ("все хорошо", "ru", "все хорошо"),            # все/всё is ambiguous: left alone
+    ("ее нет", "ru", "её нет"),
+    ("Иван Петров пришел", "ru", "Иван Петров пришёл"),
+    ("строящей порхал", "ru", "строящей порхал"),  # real forms missing from the word list stay
+    ("NATO SCK", "lat", "NATO SCK"),
+    ("yflj jngbcfnmcz", "lat", "надо отписаться"),
+])
+def test_polish(eng, text, layout, want):
+    assert simulate(eng, text, layout, polish={}) == want
+
+
+def test_polish_options_off(eng):
+    off = {"typos": False, "yo": False, "spaces": False}
+    assert simulate(eng, "и еще програама", "ru", polish=off) == "и еще програама"
+
+
+def test_letters_never_become_leading_punctuation(eng):
+    assert simulate(eng, "эьл", "ru") == "эьл"
+
+
+def test_typo_exception(eng):
+    e = Engine(eng.L, eng.lm)
+    keys = e.L.keys_for("програама", "ru")
+    e.add_exception(e.key_id(keys))
+    assert e.polish("програама", "ru", kid=e.key_id(keys)) is None

@@ -21,6 +21,11 @@ break passwords and commands, and cannot tell Russian from Ukrainian. Keyglot re
 A real word of another language is left alone: `deadline` stays `deadline` inside Russian text.
 In a terminal only Cyrillic garbage that is a command becomes Latin (`пше ыефегы` → `git status`), never the other way.
 
+In normal text Keyglot also fixes clear typos (`програама` → `программа`, `wrold` → `world`), puts ё into
+Russian words (`еще` → `ещё`, but `все` stays: it can be either), and repairs a space typed a letter too late or
+too early or missed (`приветк ак` / `приве ткак` / `приветкак` → `привет как`). Only words that are unknown in every
+language of their alphabet are touched, and Backspace undoes any fix.
+
 ## Install
 
 Download **Keyglot-Setup-x.y.z.exe** from [Releases](https://github.com/petrovrv/keyglot/releases/latest) and run it.
@@ -38,7 +43,7 @@ Just type. The tray icon shows the language of the active window.
 | **Pause** | Convert the last word to the other layout |
 | **Shift+Pause** | Turn Keyglot off/on |
 
-Settings (tray icon → Settings): correction on Enter, layout pre-switch per window, per-program mode
+Settings (tray icon → Settings): correction on Enter, typos, ё, spaces, layout pre-switch per window, per-program mode
 (*auto*, *off*, *Latin only*), exceptions, updates, interface language (English, Русский, Українська, Nederlands).
 
 ## Privacy

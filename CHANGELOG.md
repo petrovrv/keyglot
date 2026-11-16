@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 — 2026-11-16
+
+- Typo fixes in words already typed in the right layout: one wrong, missing, extra or swapped letter
+  (neighbour keys and doubled letters count as likely), two edits for longer words (`програама` → `программа`).
+  Only words unknown in all languages of their alphabet; forms that look like a real inflection stay.
+- ё in Russian words (`еще` → `ещё`, `пришел` → `пришёл`); words that are different words with е (`все`, `небо`) stay.
+- A misplaced space: one letter too late or too early (`приветк ак`, `приве ткак` → `привет как`), a missing
+  space (`приветкак`), a stray space inside a word.
+- Fix: the first letters of a word are never turned into punctuation (`эьл` became `'mk`).
+- The layout is read from the thread that has the keyboard focus, and the switch request also goes to the focused
+  window (Chromium/Electron apps such as Edge, LinkedIn, CO Desktop).
+- The log records the layout of each fix and `switch_missed` when a requested layout switch did not take.
+- Settings: Fix typos, Put ё, Fix spaces (all on by default).
+
 ## 0.2.0 — 2026-11-16
 
 First public build.
