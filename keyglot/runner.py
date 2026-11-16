@@ -41,6 +41,8 @@ class Runner:
         self.tail = ""                # text typed in this field so far (for the detailed log)
         self.erased = ""              # what the user erased with Backspace before the current word
         self.bs_word = 0              # Backspaces inside the current word
+        self.sess = None              # the current input of the detailed log (inputlog.Session)
+        self.vgroup = None            # layout group the trace renders keys in
 
     # ------------------------------------------------------------ utils ---
     @property
@@ -80,29 +82,72 @@ class Runner:
     def private(self, hwnd):
         return IL.excluded(self.cfg.get("log_exclude"), self.exe, W.window_title(hwnd) if hwnd else "")
 
-    def vlog(self, hwnd, kind, **ev):
-        """Detailed input log: never password fields or excluded windows (password managers, banks)."""
-        if not self.cfg.get("log_verbose") or kind == "skip":
-            return
-        title = W.window_title(hwnd) if hwnd else ""
-        if IL.excluded(self.cfg.get("log_exclude"), self.exe, title):
-            return
-        fi = self.ctxp.get(hwnd)
-        IL.write(exe=self.exe, title=title[:80], field=(fi.name[:40] if fi else None), kind=kind, **ev)
-
-    def _vword(self, hwnd, ctx, d, orig, out, bvk, hkl, bs, erased):
+    # -------------------------------------------------------- input log ---
+    def _sess(self, hwnd):
+        """The current input of the detailed log; a new one starts on the first key."""
         if not self.cfg.get("log_verbose"):
+            self.sess = None
+            return None
+        s = self.sess
+        if s:
+            idle = time.time() - s.t1 > IL.IDLE
+            if s.hwnd != hwnd or idle or len(s.trace) > IL.MAX_KEYS:
+                self.flush("window" if s.hwnd != hwnd else "idle" if idle else "long")
+                s = None
+        if s is None:
+            s = self.sess = IL.Session(hwnd, self.exe, W.window_title(hwnd) if hwnd else "", self.tail[-60:])
+            self.vgroup = LANG_GROUP.get(W.hkl_lang(W.window_hkl(hwnd)))
+        return s
+
+    def vkey(self, hwnd, tok):
+        s = self._sess(hwnd)
+        if s:
+            s.key(tok)
+        return s
+
+    def _vctx(self, hwnd, kind, layout, ctx=None):
+        """Field context of the input; text typed after a click into another field starts a new input."""
+        s = self.sess
+        if not s:
+            return None
+        fi = self.ctxp.get(hwnd)
+        field = fi.name if fi else None
+        title = W.window_title(hwnd)
+        new_field = s.click_at is not None and s.field and field and field != s.field
+        if new_field or title != s.title:  # another field, or another tab of the browser
+            rest = s.split_at_click() if s.click_at is not None else []
+            self.flush("click" if new_field else "title")
+            s = self._sess(hwnd)
+            s.trace, s.before = rest + s.trace, ""
+        s.click_at = None
+        s.context(kind, layout, field, _top(ctx.doc) if ctx else None, _top(ctx.conv) if ctx else None)
+        return s
+
+    def flush(self, end, on_hook=True):
+        """Write the current input, unless it was a password field or an excluded window."""
+        s, self.sess = self.sess, None
+        if not s or not s.trace:
             return
-        ev = dict(event="word", typed=orig, out=out, action="fix" if out != orig else "keep",
-                  reason=d.get("reason"), lang=d.get("lang"), margin=d.get("margin"),
-                  cands=[[c[3], round(c[0], 1)] for c in d.get("cands", [])[:3]],
-                  layout=W.hkl_lang(hkl), doc=_top(ctx.doc), conv=_top(ctx.conv),
-                  end="enter" if bvk == W.VK_RETURN else "space", before=self.tail[-40:])
-        if bs:
-            ev["bs"] = bs
-        if erased:
-            ev["erased"] = erased  # the user erased this and typed the word again: a missed or wrong fix
-        self.vlog(hwnd, ctx.kind, **{k: v for k, v in ev.items() if v not in (None, [], "")})
+        if on_hook and self.keys and self.vgroup:
+            s.text += self.E.L.render(self.keys, self.vgroup, composed=True)  # a word not ended by a space
+        if s.kind is None:  # no word ended, e.g. a password and Tab
+            if on_hook:
+                kind = self._ctx(s.hwnd).kind
+            else:
+                fi = self.ctxp.get(s.hwnd, 600)
+                kind = classify(fi, self.cfg["rules"]) if fi else "skip"
+            s.private = s.private or kind == "skip"
+            s.kind = kind
+        excl = self.cfg.get("log_exclude")
+        if s.private or IL.excluded(excl, s.exe, s.title) or IL.excluded(excl, s.exe, W.window_title(s.hwnd)):
+            return
+        IL.write(**s.event(end))
+
+    def _tail(self, drop, add):
+        """Edit the text known before the caret (and the current input's text)."""
+        self.tail = (self.tail[:max(0, len(self.tail) - drop)] + add)[-200:]
+        if self.sess:
+            self.sess.edit(drop, add)
 
     # ----------------------------------------------------------- worker ---
     def _worker(self):
@@ -138,6 +183,9 @@ class Runner:
                 if self.dirty:
                     self.dirty = False
                     C.save_state(self.E.state)
+                s = self.sess
+                if s and time.time() - s.t1 > IL.IDLE:
+                    self.flush("idle", on_hook=False)
                 if time.time() - self._prune_t > 3600:
                     self._prune_t = time.time()
                     IL.prune(self.cfg.get("log_days", 14))
@@ -160,16 +208,24 @@ class Runner:
         if vk == W.VK_PAUSE:
             self.blocked_up.add(vk)
             if shift:
+                self.flush("off")
                 self.set_enabled(not self.enabled)
             else:
                 self.manual_convert()
             return True
-        if not self.enabled or W.key_down(W.VK_CONTROL) or W.key_down(W.VK_MENU) or \
-                W.key_down(W.VK_LWIN) or W.key_down(W.VK_RWIN):
+        ctrl, alt = W.key_down(W.VK_CONTROL), W.key_down(W.VK_MENU)
+        if not self.enabled or ctrl or alt or W.key_down(W.VK_LWIN) or W.key_down(W.VK_RWIN):
+            s = self.sess
+            if s and self.enabled and (ctrl or alt) and W.user32.GetForegroundWindow() == s.hwnd:
+                s.key(IL.key_name(vk, shift, ctrl, alt))  # Ctrl+Backspace, Ctrl+Z, Ctrl+V ...
+                s.click_at = len(s.trace)                  # Ctrl+Tab, Ctrl+L ... may leave the field
+                if vk == W.VK_RETURN:
+                    self.flush("enter")
             self.reset()
             return False
         hwnd = W.user32.GetForegroundWindow()
         if hwnd != self.hwnd:
+            self.flush("window")
             self.hwnd = hwnd
             self.exe = W.window_exe(hwnd)
             self.reset()
@@ -180,6 +236,7 @@ class Runner:
             if self.last_corr and not self.keys:
                 return self.undo()
             self.last_corr = None
+            s = self.vkey(hwnd, "⌫")
             if self.keys:
                 self.keys.pop()
                 self.bs_word += 1
@@ -188,6 +245,8 @@ class Runner:
                 if self.tail:
                     self.erased = self.tail[-1] + self.erased
                     self.tail = self.tail[:-1]
+                if s and not s.moved:
+                    s.edit(1, "")
             return False
         self.last_corr = None
 
@@ -196,11 +255,24 @@ class Runner:
                 self.ctxp.request(hwnd)  # read the field while the word is being typed
             caps = W.user32.GetKeyState(W.VK_CAPITAL) & 1
             self.keys.append((vk, shift, caps))
+            if self.cfg.get("log_verbose"):
+                s = self._sess(hwnd)
+                if len(self.keys) == 1:  # the user may have switched the layout since the last word
+                    self.vgroup = LANG_GROUP.get(W.hkl_lang(W.window_hkl(hwnd))) or self.vgroup
+                s.key(self.E.L.render([(vk, shift, caps)], self.vgroup) if self.vgroup else "?")
             if vk in DIGIT_VKS and not shift:
                 self.nonword = True
             return False
         if vk == W.VK_SPACE or (vk == W.VK_RETURN and self.cfg.get("correct_on_enter", True)):
-            return self.on_boundary(vk)
+            r = self.on_boundary(vk)
+            if vk == W.VK_RETURN and not shift:
+                self.flush("enter")
+            return r
+        s = self.vkey(hwnd, IL.key_name(vk, shift)) if self.cfg.get("log_verbose") else None
+        if s and vk in (W.VK_RETURN, W.VK_TAB, 0x1B) and not (vk == W.VK_RETURN and shift):
+            self.flush({W.VK_RETURN: "enter", W.VK_TAB: "tab"}.get(vk, "esc"))
+        elif s and vk in (0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28):
+            s.moved = True
         self.reset()  # arrows, Home, End, Delete, Esc, Tab, F-keys ...
         return False
 
@@ -219,9 +291,11 @@ class Runner:
         bs, self.bs_word = self.bs_word, 0
         erased, self.erased = self.erased, ""
         bch = "\n" if bvk == W.VK_RETURN else " "
+        btok = " " if bvk == W.VK_SPACE else IL.key_name(bvk, W.key_down(W.VK_SHIFT))
         if not keys:
             self.prev = None
-            self.tail = (self.tail + bch)[-200:]
+            self.vkey(self.hwnd, btok)
+            self._tail(0, bch)
             return False
         hwnd = self.hwnd
         hkl = W.window_hkl(hwnd)
@@ -237,18 +311,21 @@ class Runner:
         if self.nonword or not active_group:
             self.nonword = False
             self.prev = None
-            if active_group and self.cfg.get("log_verbose"):
+            s = self.vkey(hwnd, btok)
+            if active_group and s:
                 typed = self.E.L.render(keys, active_group, composed=True)
                 kind = self._ctx(hwnd).kind
+                s = self._vctx(hwnd, kind, active_lang)
                 if kind != "skip":
-                    self.vlog(hwnd, kind, event="word", typed=typed, out=typed, action="keep", reason="has digits",
-                              layout=active_lang, **({"erased": erased} if erased else {}))
-                    self.tail = (self.tail + typed + bch)[-200:]
-            else:
-                self.tail = ""
+                    s.word(typed, typed, {"reason": "has digits"}, bs, erased)
+                    self._tail(0, typed + bch)
+                    return False
+            self.tail = ""
             return False
         ctx = self._ctx(hwnd)
         ctx.user_switched = user_switched
+        s = self._vctx(hwnd, ctx.kind, active_lang, ctx)
+        self.vgroup = active_group
         if self.prev and self.prev["hwnd"] == hwnd and time.time() - self.prev["t"] < 60:
             ctx.sticky = self.prev["lang"]
         d = self.E.decide(keys, active_group, ctx)
@@ -300,11 +377,14 @@ class Runner:
                 out = (head + " " if head else "") + pol["text"]
             reason = (reason + "; " if reason else "") + pol["reason"]
         if out == orig:
+            if s:
+                s.key(btok)
             if ctx.kind == "skip":
                 self.tail = ""
             else:
-                self._vword(hwnd, ctx, d, orig, out, bvk, hkl, bs, erased)
-                self.tail = (self.tail + out + bch)[-200:]
+                if s:
+                    s.word(orig, out, d, bs, erased)
+                self._tail(0, out + bch)
             self.prev = {"keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk,
                          "lang": lang or ctx.sticky, "t": time.time(), "raw": typed, "shown": typed,
                          "kid": d.get("key_id", "")}
@@ -320,9 +400,12 @@ class Runner:
             self.event(event="fix", exe=ctx.exe, kind=ctx.kind, frm=orig, to=out, reason=reason,
                        doc=_top(ctx.doc), conv=_top(ctx.conv), key=ctx.key, hkl=_hex(hkl))
         d["reason"] = reason
-        self._vword(hwnd, ctx, d, orig, out, bvk, hkl, bs, erased)
-        cut = max(0, len(self.tail) - (n_back - len(d.get("typed", ""))))
-        self.tail = (self.tail[:cut] + out + bch)[-200:]
+        if s:
+            s.word(orig, out, d, bs, erased)
+            s.key(("{→" if orig == typed else "{" + orig + "→") + out + "}" + btok)
+            if switch_to:
+                self.vgroup = LANG_GROUP.get(switch_to, self.vgroup)
+        self._tail(n_back - len(typed), out + bch)
         self.last_corr = None if bvk == W.VK_RETURN else {
             "orig": orig, "new": out, "bvk": bvk, "hwnd": hwnd, "lang": active_lang, "kids": kids,
             "exe": ctx.exe, "kind": ctx.kind, "key": ctx.key}
@@ -343,8 +426,13 @@ class Runner:
         self.prev = None
         if not self.private(c["hwnd"]):
             self.event(event="undo", exe=c["exe"], kind=c["kind"], frm=c["new"], to=c["orig"], key=c["key"])
-        self.vlog(c["hwnd"], c["kind"], event="undo", frm=c["new"], to=c["orig"], before=self.tail[-40:])
         bch = "\n" if c["bvk"] == W.VK_RETURN else " "
+        s = self.vkey(c["hwnd"], "⌫{undo}")
+        if s:
+            s.n["undo"] += 1
+            if s.text.endswith(c["new"] + bch):
+                s.text = s.text[:-(len(c["new"]) + 1)] + c["orig"] + bch
+            self.vgroup = LANG_GROUP.get(c["lang"], self.vgroup)
         if self.tail.endswith(c["new"] + bch):
             self.tail = self.tail[:-(len(c["new"]) + 1)] + c["orig"] + bch
         return True
@@ -372,9 +460,18 @@ class Runner:
         self.jobs.put(("rewrite", hwnd, len(typed) + tail, best[0], bvk if tail else None, best[2]))
         if not self.private(hwnd):
             self.event(event="manual", exe=self.exe, frm=typed, to=best[0])
-        self.vlog(hwnd, self._ctx(hwnd).kind, event="manual", frm=typed, to=best[0], before=self.tail[-40:])
-        if tail and self.tail.endswith(typed + ("\n" if bvk == W.VK_RETURN else " ")):
-            self.tail = self.tail[:-(len(typed) + 1)] + best[0] + ("\n" if bvk == W.VK_RETURN else " ")
+        bch = "\n" if bvk == W.VK_RETURN else " "
+        s = self.vkey(hwnd, "[Pause]{" + typed + "→" + best[0] + "}")
+        if s:
+            s.n["manual"] += 1
+            self.vgroup = LANG_GROUP.get(best[2], self.vgroup)
+        if not tail:
+            self._tail(0, best[0])  # the word in progress, now converted
+        else:
+            if self.tail.endswith(typed + bch):
+                self.tail = self.tail[:-(len(typed) + 1)] + best[0] + bch
+            if s and s.text.endswith(typed + bch):
+                s.text = s.text[:-(len(typed) + 1)] + best[0] + bch
         self.keys = []
         self.prev = None
 
@@ -429,6 +526,11 @@ class Runner:
         @W.HOOKPROC
         def mouse_proc(code, wparam, lparam):
             if code == 0 and wparam in (0x201, 0x204, 0x207):  # a click may move the caret
+                s = self.sess
+                if s:
+                    s.key("[click]")
+                    s.moved = True
+                    s.click_at = len(s.trace)
                 self.reset()
             return W.user32.CallNextHookEx(None, code, wparam, lparam)
 

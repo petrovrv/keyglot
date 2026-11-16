@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2 — 2026-11-16
+
+- The detailed input log writes one line per input instead of one per word. An input is what you type into one
+  field until Enter, Tab, Esc, a window or browser-tab change, a click into another field or a minute's pause.
+  The line has the final text, the text before it, the program, window, field, layouts, language of the text and
+  conversation, and `keys`: every key in order — characters as the layout showed them, `⌫` Backspace, `⌦` Delete,
+  arrows, `[^Z]` and other Ctrl shortcuts, `[click]`, `[Pause]`, `{→привет}` where Keyglot rewrote a word,
+  `{undo}` where Backspace undid it. Words worth a look (fixes, near misses, retyped words, Backspace inside a word)
+  are listed in `decisions` with the candidates and scores.
+- A password field anywhere in the input drops the whole input; excluded windows are checked by title at every word.
+- Pause on a word still being typed now keeps the converted word in the context Keyglot reads.
+- `tools/log_digest.py` reads both formats and shows the edited inputs with their keys.
+
 ## 0.3.1 — 2026-11-16
 
 - Detailed input log (Settings → General, off by default): one line per word with what was typed, what Keyglot

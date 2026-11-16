@@ -50,7 +50,9 @@ Settings (tray icon → Settings): correction on Enter, typos, ё, spaces, layou
 
 Everything runs on your computer. Keyglot keeps per-program language counts, your exceptions and a log of corrections
 (`%LOCALAPPDATA%\Keyglot`, can be switched off). Password fields are never read or changed.
-An optional detailed input log (off by default) records every word with the decision and its context, for tuning;
+An optional detailed input log (off by default) records every input — the phrase typed into one field up to Enter,
+Tab, a window change or a pause — with its context, every key pressed (Backspace, arrows, Ctrl+Z, Pause, Keyglot's own
+rewrites and their undo) and Keyglot's decisions, for tuning;
 it stays in `%LOCALAPPDATA%\Keyglot\input`, is deleted after 14 days and skips password fields and excluded windows
 (password managers and banks by default). `python tools/log_digest.py` summarises a day of it.
 The only network access is the update check against GitHub.

@@ -24,7 +24,7 @@ DEFAULTS = {
     "fix_spaces": True,         # приветк ак -> привет как, приветкак -> привет как
     "sound": True,
     "log_events": True,
-    "log_verbose": False,       # detailed input log: every word, the decision and the user's own edits
+    "log_verbose": False,       # detailed input log: every input (phrase), its context, keys and edits
     "log_days": 14,             # detailed log files older than this are deleted
     # windows never written to the detailed log: substring of exe/title, "re:" = case-sensitive regex on the title
     "log_exclude": ["bitwarden", "keepass", "1password", "home'bank", "homebank", "ing.be", "ing belgi",

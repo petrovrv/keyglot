@@ -12,7 +12,7 @@ from keyglot.engine import Engine
 from keyglot.layouts import Layouts
 from keyglot.lexicon import LanguageModel
 
-VK_SPACE, VK_BACK = 0x20, 0x08
+VK_SPACE, VK_BACK, VK_RETURN, VK_TAB, VK_LEFT = 0x20, 0x08, 0x0D, 0x09, 0x25
 
 
 @pytest.fixture(scope="module")
@@ -68,12 +68,24 @@ def run(eng, monkeypatch, tmp_path):
     return types.SimpleNamespace(r=r, typ=typ, lines=lines, title=title, dir=tmp_path)
 
 
-def test_words_and_fix_logged(run):
+def enter(run):
+    run.r.on_key(VK_RETURN, True, False, 0)
+
+
+def test_one_line_per_input(run):
     run.typ("hello ghbdtn")
-    ev = [e for e in run.lines() if e["event"] == "word"]
-    assert [(e["typed"], e["out"], e["action"]) for e in ev] == [("hello", "hello", "keep"),
-                                                                 ("ghbdtn", "привет", "fix")]
-    assert ev[1]["before"] == "hello " and ev[1]["exe"] == "msedge.exe" and ev[1]["kind"] == "prose"
+    enter(run)
+    ev = run.lines()
+    assert len(ev) == 1
+    e = ev[0]
+    assert e["event"] == "input" and e["end"] == "enter"
+    assert e["text"] == "hello привет"
+    assert e["keys"] == "hello ghbdtn{→привет} ⏎"
+    assert e["words"] == 2 and e["fixes"] == 1
+    assert e["exe"] == "msedge.exe" and e["kind"] == "prose" and e["layout"] == "en"
+    assert e["decisions"] == [{"typed": "ghbdtn", "out": "привет", "reason": e["decisions"][0]["reason"],
+                               "lang": "ru", "margin": e["decisions"][0]["margin"],
+                               "cands": e["decisions"][0]["cands"]}]
 
 
 def test_retype_records_erased_text(run):
@@ -81,8 +93,11 @@ def test_retype_records_erased_text(run):
     for _ in range(6):
         run.r.on_key(VK_BACK, True, False, 0)
     run.typ("help")
-    ev = run.lines()[-1]
-    assert ev["typed"] == "help" and ev["erased"] == "hello " and ev.get("before") is None
+    enter(run)
+    e = run.lines()[-1]
+    assert e["keys"] == "hello ⌫⌫⌫⌫⌫⌫help ⏎"
+    assert e["text"] == "help" and e["retypes"] == 1
+    assert e["decisions"][0]["typed"] == "help" and e["decisions"][0]["erased"] == "hello "
 
 
 def test_backspace_inside_word_counted(run):
@@ -90,7 +105,52 @@ def test_backspace_inside_word_counted(run):
         run.r.on_key(vk, True, False, 0)
     run.r.on_key(VK_BACK, True, False, 0)
     run.typ("lo")
-    assert run.lines()[-1]["bs"] == 1
+    enter(run)
+    e = run.lines()[-1]
+    assert e["keys"] == "helo⌫lo ⏎" and e["text"] == "hello" and e["bs"] == 1
+
+
+def test_undo_in_trace(run):
+    run.typ("hello ghbdtn")
+    run.r.on_key(VK_BACK, True, False, 0)
+    enter(run)
+    e = run.lines()[-1]
+    assert e["keys"] == "hello ghbdtn{→привет} ⌫{undo}⏎"
+    assert e["text"] == "hello ghbdtn" and e["undo"] == 1
+
+
+def test_nav_keys_and_tab_end(run):
+    run.typ("hello")
+    run.r.on_key(VK_LEFT, True, False, 0)
+    run.typ("x")
+    run.r.on_key(VK_TAB, True, False, 0)
+    e = run.lines()[-1]
+    assert e["keys"] == "hello ←x ⇥" and e["end"] == "tab" and e["moved"] is True
+
+
+def test_window_change_ends_input(run, monkeypatch):
+    run.typ("hello")
+    monkeypatch.setattr(R.W, "user32", types.SimpleNamespace(GetForegroundWindow=lambda: 2, GetKeyState=lambda vk: 0))
+    run.typ("world")
+    enter(run)
+    ev = run.lines()
+    assert [(e["text"], e["end"]) for e in ev] == [("hello", "window"), ("world", "enter")]
+
+
+def test_idle_flush(run):
+    run.typ("hello")
+    run.r.sess.t1 -= 120
+    run.r.flush("idle", on_hook=False)
+    assert run.lines()[-1]["end"] == "idle" and run.r.sess is None
+
+
+def test_password_field_not_logged(run, monkeypatch):
+    monkeypatch.setattr(R.W, "focus_is_win32_password", lambda h: True)
+    run.typ("secret123")
+    run.r.on_key(VK_TAB, True, False, 0)
+    run.typ("hunter")
+    enter(run)
+    assert run.lines() == []
 
 
 def test_excluded_windows_not_logged(run):
@@ -98,10 +158,25 @@ def test_excluded_windows_not_logged(run):
     run.typ("hello world")
     run.title[0] = "Keytrade Bank - Microsoft Edge"
     run.typ("hello world")
-    assert run.lines() == []
     run.title[0] = "Meeting notes - Word"
     run.typ("hello")
-    assert len(run.lines()) == 1
+    enter(run)
+    ev = run.lines()
+    assert len(ev) == 1 and ev[0]["text"] == "hello" and ev[0]["title"] == "Meeting notes - Word"
+
+
+def test_verbose_off_writes_nothing(run):
+    run.r.cfg["log_verbose"] = False
+    run.typ("hello ghbdtn")
+    enter(run)
+    assert run.lines() == []
+
+
+def test_key_names():
+    assert IL.key_name(0x5A, ctrl=True) == "[^Z]"
+    assert IL.key_name(0x08, ctrl=True) == "[^⌫]"
+    assert IL.key_name(0x0D, shift=True) == "[⇧⏎]"
+    assert IL.key_name(0x25) == "←"
 
 
 def test_excluded_patterns():
