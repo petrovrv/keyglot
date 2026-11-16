@@ -36,6 +36,13 @@ _RU_END = """а я о е и ы у ю ь й ой ей ий ый ая яя ое е
 _UK_END = """а я о е и і у ю ь й ий ій ої ою ою ого ому ім ом ем ам ям ами ями ах ях ів їв
 ти ла ло ли в ла є ить ать ять ути ують ую юю ість ості ся сь""".split()
 INFLECTED = {"ru": _RU_END, "uk": _UK_END}
+# Case endings of nouns: a known stem ending in a consonant + one of these is a form (имейл -> имейла)
+NOUN_END = {"ru": ("а", "у", "ом", "е", "ы", "ов", "ам", "ами", "ах"),
+            "uk": ("а", "у", "ом", "і", "и", "ів", "ам", "ами", "ах")}
+VOWELS = set("аеёиоуыэюяіїєaeiouy")
+# First parts of compounds: автокоррекция is one word, not "авто коррекция"
+COMPOUND_HEADS = tuple("""авто аудио видео фото кино теле радио микро макро мега мини макси супер гипер анти псевдо
+полу само нео эко био гео агро авиа вело мото электро термо гидро аэро медиа мульти квази пост пред""".split())
 
 
 def _neighbours():
@@ -225,12 +232,20 @@ class Speller:
                         return True
         return False
 
+    def noun_form(self, word, lang):
+        """A case form of a known noun missing from the word list: имейла, имейлом."""
+        for e in NOUN_END.get(lang, ()):
+            stem = word[:-len(e)]
+            if word.endswith(e) and len(stem) >= 4 and stem[-1] not in VOWELS and self.z(stem, lang) >= 2.0:
+                return True
+        return False
+
     def correct(self, word, group, prior=None):
         """Typo fix for a lowercase word typed in `group`: (new_word, lang, info, cost) or None."""
         langs = GROUP_LANGS[group]
         n = len(word)
         if n < 3 or not word.isalpha() or self.known_anywhere(word) or \
-                any(self.inflected(word, l) for l in langs):
+                any(self.inflected(word, l) or self.noun_form(word, l) for l in langs):
             return None
         prior = prior or {}
         cands = {}
@@ -286,7 +301,7 @@ class Speller:
 
     def split(self, word, lang):
         """Missing space: приветкак -> (привет, как)."""
-        if len(word) < 5 or self.known_anywhere(word):
+        if len(word) < 5 or self.known_anywhere(word) or word.startswith(COMPOUND_HEADS):
             return None
         best = None
         for i in range(1, len(word) - 1):
@@ -296,6 +311,8 @@ class Speller:
             if self._ok_part(a, lang, 5.0 if len(a) == 2 else 3.5) and \
                     self._ok_part(b, lang, 5.0 if len(b) == 2 else 3.5):
                 s = min(self.z(a, lang), self.z(b, lang))
+                if max(self.z(a, lang), self.z(b, lang)) < 5.0:
+                    continue  # one part should be a common word (как, это, на): валидна is not "вали дна"
                 if best is None or s > best[2]:
                     best = (a, b, s)
         return best[:2] if best else None

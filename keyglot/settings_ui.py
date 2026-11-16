@@ -43,8 +43,8 @@ class SettingsWindow:
         self.state = C.load_state()
         self.root = tk.Tk()
         self.root.title(f"Keyglot {__version__}")
-        self.root.geometry("640x470")
-        self.root.minsize(560, 420)
+        self.root.geometry("640x540")
+        self.root.minsize(560, 500)
         try:
             self.root.iconbitmap(self._icon())
         except tk.TclError:
@@ -75,10 +75,16 @@ class SettingsWindow:
         f = ttk.Frame(parent, padding=14)
         self.vars = {}
         for key in ("enabled", "correct_on_enter", "fix_typos", "fix_yo", "fix_spaces", "preswitch", "sound",
-                    "log_events"):
-            v = tk.BooleanVar(value=self.cfg.get(key, True))
+                    "log_events", "log_verbose"):
+            v = tk.BooleanVar(value=self.cfg.get(key, C.DEFAULTS.get(key, True)))
             self.vars[key] = v
-            ttk.Checkbutton(f, text=t(key), variable=v).pack(anchor="w", pady=2)
+            label = t(key).replace("{d}", str(self.cfg.get("log_days", 14)))
+            ttk.Checkbutton(f, text=label, variable=v).pack(anchor="w", pady=2)
+        row = ttk.Frame(f)
+        row.pack(fill="x", padx=(22, 0), pady=(0, 2))
+        ttk.Label(row, text=t("log_exclude") + ":", foreground="#555").pack(anchor="w")
+        self.log_exclude = tk.StringVar(value="; ".join(self.cfg.get("log_exclude") or []))
+        ttk.Entry(row, textvariable=self.log_exclude).pack(fill="x")
         self.autostart = tk.BooleanVar(value=autostart_get())
         ttk.Checkbutton(f, text=t("autostart"), variable=self.autostart).pack(anchor="w", pady=2)
         ttk.Separator(f).pack(fill="x", pady=10)
@@ -173,6 +179,7 @@ class SettingsWindow:
     def save(self):
         for k, v in self.vars.items():
             self.cfg[k] = bool(v.get())
+        self.cfg["log_exclude"] = [p.strip() for p in self.log_exclude.get().split(";") if p.strip()]
         self.cfg["updates"] = self.upd.get()
         self.cfg["ui_lang"] = self.ui_lang.get()
         self.cfg["rules"] = self.rules

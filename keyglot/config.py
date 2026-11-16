@@ -24,6 +24,11 @@ DEFAULTS = {
     "fix_spaces": True,         # приветк ак -> привет как, приветкак -> привет как
     "sound": True,
     "log_events": True,
+    "log_verbose": False,       # detailed input log: every word, the decision and the user's own edits
+    "log_days": 14,             # detailed log files older than this are deleted
+    # windows never written to the detailed log: substring of exe/title, "re:" = case-sensitive regex on the title
+    "log_exclude": ["bitwarden", "keepass", "1password", "home'bank", "homebank", "ing.be", "ing belgi",
+                    r"re:\bING\b", "keytrade"],
     "updates": "auto",          # auto | notify | off
     "ui_lang": "auto",          # auto | en | ru | uk | nl
     "rules": {},                # exe -> auto | off | latin

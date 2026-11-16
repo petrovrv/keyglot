@@ -7,6 +7,7 @@ import time
 from ctypes import wintypes as w
 
 from . import config as C
+from . import inputlog as IL
 from . import winapi as W
 from .context import ContextProvider, SKIP_EXE, TERMINAL_EXE, classify, FieldInfo
 from .engine import Ctx, LATIN_KINDS
@@ -36,6 +37,10 @@ class Runner:
         self.thread_id = None
         self.on_state_change = None   # callback for the tray (enabled flag)
         self._cfg_mtime = 0
+        self._prune_t = 0
+        self.tail = ""                # text typed in this field so far (for the detailed log)
+        self.erased = ""              # what the user erased with Backspace before the current word
+        self.bs_word = 0              # Backspaces inside the current word
 
     # ------------------------------------------------------------ utils ---
     @property
@@ -54,9 +59,12 @@ class Runner:
     def reset(self, keep_prev=False):
         self.keys = []
         self.nonword = False
+        self.bs_word = 0
         if not keep_prev:
             self.prev = None
             self.last_corr = None
+            self.tail = ""
+            self.erased = ""
 
     def switch_layout(self, hwnd, lang):
         hkl = self.E.L.hkls.get(lang)
@@ -68,6 +76,33 @@ class Runner:
     def event(self, **ev):
         if self.cfg.get("log_events", True):
             C.log_event(**ev)
+
+    def private(self, hwnd):
+        return IL.excluded(self.cfg.get("log_exclude"), self.exe, W.window_title(hwnd) if hwnd else "")
+
+    def vlog(self, hwnd, kind, **ev):
+        """Detailed input log: never password fields or excluded windows (password managers, banks)."""
+        if not self.cfg.get("log_verbose") or kind == "skip":
+            return
+        title = W.window_title(hwnd) if hwnd else ""
+        if IL.excluded(self.cfg.get("log_exclude"), self.exe, title):
+            return
+        fi = self.ctxp.get(hwnd)
+        IL.write(exe=self.exe, title=title[:80], field=(fi.name[:40] if fi else None), kind=kind, **ev)
+
+    def _vword(self, hwnd, ctx, d, orig, out, bvk, hkl, bs, erased):
+        if not self.cfg.get("log_verbose"):
+            return
+        ev = dict(event="word", typed=orig, out=out, action="fix" if out != orig else "keep",
+                  reason=d.get("reason"), lang=d.get("lang"), margin=d.get("margin"),
+                  cands=[[c[3], round(c[0], 1)] for c in d.get("cands", [])[:3]],
+                  layout=W.hkl_lang(hkl), doc=_top(ctx.doc), conv=_top(ctx.conv),
+                  end="enter" if bvk == W.VK_RETURN else "space", before=self.tail[-40:])
+        if bs:
+            ev["bs"] = bs
+        if erased:
+            ev["erased"] = erased  # the user erased this and typed the word again: a missed or wrong fix
+        self.vlog(hwnd, ctx.kind, **{k: v for k, v in ev.items() if v not in (None, [], "")})
 
     # ----------------------------------------------------------- worker ---
     def _worker(self):
@@ -103,6 +138,9 @@ class Runner:
                 if self.dirty:
                     self.dirty = False
                     C.save_state(self.E.state)
+                if time.time() - self._prune_t > 3600:
+                    self._prune_t = time.time()
+                    IL.prune(self.cfg.get("log_days", 14))
             except Exception as e:
                 self.event(event="error", where="housekeeping", error=repr(e))
 
@@ -144,8 +182,12 @@ class Runner:
             self.last_corr = None
             if self.keys:
                 self.keys.pop()
+                self.bs_word += 1
             else:
                 self.prev = None
+                if self.tail:
+                    self.erased = self.tail[-1] + self.erased
+                    self.tail = self.tail[:-1]
             return False
         self.last_corr = None
 
@@ -174,8 +216,12 @@ class Runner:
 
     def on_boundary(self, bvk):
         keys, self.keys = self.keys, []
+        bs, self.bs_word = self.bs_word, 0
+        erased, self.erased = self.erased, ""
+        bch = "\n" if bvk == W.VK_RETURN else " "
         if not keys:
             self.prev = None
+            self.tail = (self.tail + bch)[-200:]
             return False
         hwnd = self.hwnd
         hkl = W.window_hkl(hwnd)
@@ -191,6 +237,15 @@ class Runner:
         if self.nonword or not active_group:
             self.nonword = False
             self.prev = None
+            if active_group and self.cfg.get("log_verbose"):
+                typed = self.E.L.render(keys, active_group, composed=True)
+                kind = self._ctx(hwnd).kind
+                if kind != "skip":
+                    self.vlog(hwnd, kind, event="word", typed=typed, out=typed, action="keep", reason="has digits",
+                              layout=active_lang, **({"erased": erased} if erased else {}))
+                    self.tail = (self.tail + typed + bch)[-200:]
+            else:
+                self.tail = ""
             return False
         ctx = self._ctx(hwnd)
         ctx.user_switched = user_switched
@@ -245,6 +300,11 @@ class Runner:
                 out = (head + " " if head else "") + pol["text"]
             reason = (reason + "; " if reason else "") + pol["reason"]
         if out == orig:
+            if ctx.kind == "skip":
+                self.tail = ""
+            else:
+                self._vword(hwnd, ctx, d, orig, out, bvk, hkl, bs, erased)
+                self.tail = (self.tail + out + bch)[-200:]
             self.prev = {"keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk,
                          "lang": lang or ctx.sticky, "t": time.time(), "raw": typed, "shown": typed,
                          "kid": d.get("key_id", "")}
@@ -256,8 +316,13 @@ class Runner:
             self.last_hkl = self.E.L.hkls.get(switch_to)
         self.E.learn(ctx, lang)
         self.dirty = True
-        self.event(event="fix", exe=ctx.exe, kind=ctx.kind, frm=orig, to=out, reason=reason,
-                   doc=_top(ctx.doc), conv=_top(ctx.conv), key=ctx.key, hkl=_hex(hkl))
+        if not self.private(hwnd):
+            self.event(event="fix", exe=ctx.exe, kind=ctx.kind, frm=orig, to=out, reason=reason,
+                       doc=_top(ctx.doc), conv=_top(ctx.conv), key=ctx.key, hkl=_hex(hkl))
+        d["reason"] = reason
+        self._vword(hwnd, ctx, d, orig, out, bvk, hkl, bs, erased)
+        cut = max(0, len(self.tail) - (n_back - len(d.get("typed", ""))))
+        self.tail = (self.tail[:cut] + out + bch)[-200:]
         self.last_corr = None if bvk == W.VK_RETURN else {
             "orig": orig, "new": out, "bvk": bvk, "hwnd": hwnd, "lang": active_lang, "kids": kids,
             "exe": ctx.exe, "kind": ctx.kind, "key": ctx.key}
@@ -276,7 +341,12 @@ class Runner:
             self.E.add_exception(k)
         self.dirty = True
         self.prev = None
-        self.event(event="undo", exe=c["exe"], kind=c["kind"], frm=c["new"], to=c["orig"], key=c["key"])
+        if not self.private(c["hwnd"]):
+            self.event(event="undo", exe=c["exe"], kind=c["kind"], frm=c["new"], to=c["orig"], key=c["key"])
+        self.vlog(c["hwnd"], c["kind"], event="undo", frm=c["new"], to=c["orig"], before=self.tail[-40:])
+        bch = "\n" if c["bvk"] == W.VK_RETURN else " "
+        if self.tail.endswith(c["new"] + bch):
+            self.tail = self.tail[:-(len(c["new"]) + 1)] + c["orig"] + bch
         return True
 
     def manual_convert(self):
@@ -300,7 +370,11 @@ class Runner:
         if not best:
             return
         self.jobs.put(("rewrite", hwnd, len(typed) + tail, best[0], bvk if tail else None, best[2]))
-        self.event(event="manual", exe=self.exe, frm=typed, to=best[0])
+        if not self.private(hwnd):
+            self.event(event="manual", exe=self.exe, frm=typed, to=best[0])
+        self.vlog(hwnd, self._ctx(hwnd).kind, event="manual", frm=typed, to=best[0], before=self.tail[-40:])
+        if tail and self.tail.endswith(typed + ("\n" if bvk == W.VK_RETURN else " ")):
+            self.tail = self.tail[:-(len(typed) + 1)] + best[0] + ("\n" if bvk == W.VK_RETURN else " ")
         self.keys = []
         self.prev = None
 

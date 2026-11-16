@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1 — 2026-11-16
+
+- Detailed input log (Settings → General, off by default): one line per word with what was typed, what Keyglot
+  decided and why (candidates, margin), the program, field, layout and the language of the text and conversation,
+  plus your own edits — Backspace after a fix, Pause, and text you erased and typed again. Daily files in
+  `%LOCALAPPDATA%\Keyglot\input`, deleted after 14 days (`log_days`). Password fields are never written, nor windows
+  that match the exclusion list (password managers; ING, Keytrade by default — editable in Settings).
+- The corrections log skips the excluded windows too.
+- `tools/log_digest.py`: a Markdown digest of one day of the detailed log (undone fixes, retyped words, near misses).
+- Fewer false fixes: a missing space is restored only when one part is a common word (`валидна` is no longer
+  `вали дна`), never after a compound head (`автокоррекции` stays); a one-letter typo beats a split
+  (`моели` → `модели`, not `моё ли`); case forms of a known noun are not typos (`имейла` stays).
+
 ## 0.3.0 — 2026-11-16
 
 - Typo fixes in words already typed in the right layout: one wrong, missing, extra or swapped letter

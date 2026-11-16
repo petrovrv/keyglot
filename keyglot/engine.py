@@ -242,7 +242,7 @@ class Engine:
         if new_prev is None and not name_like:
             typo = self.S.correct(low, group, {lang: 0.3}) if opts.get("typos", True) else None
             split = self.S.split(low, lang) if opts.get("spaces", True) else None
-            if typo and (typo[3] <= 0.8 or not split):
+            if typo and (typo[3] <= 1.0 or not split):
                 words = [typo[0]]
                 reason.append(typo[2])
             elif split:

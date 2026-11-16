@@ -109,6 +109,13 @@ def test_wordlist_lookup(eng):
     ("строящей порхал", "ru", "строящей порхал"),  # real forms missing from the word list stay
     ("NATO SCK", "lat", "NATO SCK"),
     ("yflj jngbcfnmcz", "lat", "надо отписаться"),
+    # false fixes of 0.3.0 seen in the log
+    ("отдавать поток крупной моели", "ru", "отдавать поток крупной модели"),
+    ("проблемы автокоррекции существуют", "ru", "проблемы автокоррекции существуют"),
+    ("ссылка валидна.", "ru", "ссылка валидна."),
+    ("в тексте имейла", "ru", "в тексте имейла"),
+    ("мояработа это", "ru", "моя работа это"),
+    ("этоправда", "ru", "это правда"),
 ])
 def test_polish(eng, text, layout, want):
     assert simulate(eng, text, layout, polish={}) == want

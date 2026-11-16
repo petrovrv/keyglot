@@ -50,6 +50,9 @@ Settings (tray icon → Settings): correction on Enter, typos, ё, spaces, layou
 
 Everything runs on your computer. Keyglot keeps per-program language counts, your exceptions and a log of corrections
 (`%LOCALAPPDATA%\Keyglot`, can be switched off). Password fields are never read or changed.
+An optional detailed input log (off by default) records every word with the decision and its context, for tuning;
+it stays in `%LOCALAPPDATA%\Keyglot\input`, is deleted after 14 days and skips password fields and excluded windows
+(password managers and banks by default). `python tools/log_digest.py` summarises a day of it.
 The only network access is the update check against GitHub.
 
 Windows does not let a normal program see keys typed into windows running as administrator; Keyglot does nothing there.
