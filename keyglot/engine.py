@@ -118,6 +118,9 @@ class Engine:
         if kid in self.exceptions:
             res["reason"] = "exception"
             return res
+        if not any(ch.isalpha() for ch in typed):
+            res["reason"] = "no letters typed"  # ':-)', a lone '.' or ',' never become 'Ж-)', 'ю', 'б'
+            return res
         if self.L.is_dead(keys[-1], active_group):
             res["reason"] = "ends with a dead key"
             return res

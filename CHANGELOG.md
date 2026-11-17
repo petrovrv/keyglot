@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.4 — 2026-11-17
+
+- Ctrl+Enter (send in CO Desktop, WhatsApp Web …) now fixes the last word like Enter does. Keyglot holds the
+  key back, releases Ctrl for its Backspaces (so they do not become Ctrl+Backspace), types the fix and sends Ctrl+Enter.
+- After a click, arrows, Home/End, Delete or a Ctrl shortcut the next word may continue text left of the caret:
+  it gets no typo, ё or space fix and is no anchor for the next word (a click into `помо|` then `жет ему` became
+  `же тему`). When the field shows a space or nothing left of the caret, the word is fixed as usual.
+- Text without letters is never converted: `:-)` stays (was `Ж-)`), a lone `.` or `,` stays (was `ю`, `б`).
+- A stray first letter is removed only when it is a neighbour key (`дописывает` is no longer `описывает`).
+- A letter typed twice around a space is dropped once (`хочуя я` → `хочу я`, was `хочу яя`).
+
 ## 0.3.3 — 2026-11-16
 
 - Fix: typing in Edge, WhatsApp Web, CO Desktop and other Chromium/Electron windows lagged at the start of a phrase —

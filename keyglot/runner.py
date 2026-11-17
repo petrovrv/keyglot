@@ -43,6 +43,7 @@ class Runner:
         self.bs_word = 0              # Backspaces inside the current word
         self.sess = None              # the current input of the detailed log (inputlog.Session)
         self.vgroup = None            # layout group the trace renders keys in
+        self.loose = 0               # when the caret moved (click, arrows, Ctrl+...): the next word may be a fragment
 
     # ------------------------------------------------------------ utils ---
     @property
@@ -156,10 +157,10 @@ class Runner:
             if job is None:
                 return
             try:
-                _, hwnd, n_back, text, bvk, lang = job
+                _, hwnd, n_back, text, bvk, lang = job[:6]
                 if lang:
                     self.switch_layout(hwnd, lang)
-                W.send_rewrite(n_back, text, bvk)
+                W.send_rewrite(n_back, text, bvk, job[6] if len(job) > 6 else ())
             except Exception as e:
                 self.event(event="error", where="worker", error=repr(e))
 
@@ -214,7 +215,17 @@ class Runner:
                 self.manual_convert()
             return True
         ctrl, alt = W.key_down(W.VK_CONTROL), W.key_down(W.VK_MENU)
-        if not self.enabled or ctrl or alt or W.key_down(W.VK_LWIN) or W.key_down(W.VK_RWIN):
+        win = W.key_down(W.VK_LWIN) or W.key_down(W.VK_RWIN)
+        if self.enabled and ctrl and not alt and not win and vk == W.VK_RETURN and self.keys and \
+                self.cfg.get("correct_on_enter", True) and W.user32.GetForegroundWindow() == self.hwnd and \
+                self.exe not in SKIP_EXE and self.cfg["rules"].get(self.exe) != "off":
+            # Ctrl+Enter sends the message in chats: the last word is fixed first, then Ctrl+Enter goes out
+            held = tuple(v for v in (W.VK_LCONTROL, W.VK_RCONTROL) if W.key_down(v)) or (W.VK_LCONTROL,)
+            r = self.on_boundary(vk, held)
+            self.flush("enter")
+            self.reset()
+            return r
+        if not self.enabled or ctrl or alt or win:
             s = self.sess
             if s and self.enabled and (ctrl or alt) and W.user32.GetForegroundWindow() == s.hwnd:
                 s.key(IL.key_name(vk, shift, ctrl, alt))  # Ctrl+Backspace, Ctrl+Z, Ctrl+V ...
@@ -222,6 +233,7 @@ class Runner:
                 if vk == W.VK_RETURN:
                     self.flush("enter")
             self.reset()
+            self.loose = time.time()  # Ctrl+arrows, Ctrl+V, Ctrl+Z ...: the caret may be inside a word now
             return False
         hwnd = W.user32.GetForegroundWindow()
         if hwnd != self.hwnd:
@@ -273,6 +285,8 @@ class Runner:
             self.flush({W.VK_RETURN: "enter", W.VK_TAB: "tab"}.get(vk, "esc"))
         elif s and vk in (0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28):
             s.moved = True
+        if vk in (0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2E):
+            self.loose = time.time()
         self.reset()  # arrows, Home, End, Delete, Esc, Tab, F-keys ...
         return False
 
@@ -286,12 +300,17 @@ class Runner:
             ctx = self.ctxp.build_ctx(fi, self.cfg["rules"])
         return ctx
 
-    def on_boundary(self, bvk):
+    def on_boundary(self, bvk, held=()):
+        """held: Ctrl of Ctrl+Enter, released while Keyglot rewrites the word."""
         keys, self.keys = self.keys, []
         bs, self.bs_word = self.bs_word, 0
         erased, self.erased = self.erased, ""
+        # after a click or arrows the word may continue text left of the caret ("помо|жет"): no typo, ё or
+        # space fixes for it, and it is no previous word for the next one
+        loose_t, self.loose = self.loose, 0
+        loose = bool(loose_t)
         bch = "\n" if bvk == W.VK_RETURN else " "
-        btok = " " if bvk == W.VK_SPACE else IL.key_name(bvk, W.key_down(W.VK_SHIFT))
+        btok = " " if bvk == W.VK_SPACE else IL.key_name(bvk, W.key_down(W.VK_SHIFT), bool(held))
         if not keys:
             self.prev = None
             self.vkey(self.hwnd, btok)
@@ -324,6 +343,11 @@ class Runner:
             return False
         ctx = self._ctx(hwnd)
         ctx.user_switched = user_switched
+        if loose:
+            fi = self.ctxp.get(hwnd)
+            if fi and fi.uia and fi.t > loose_t and \
+                    _at_word_start(fi.before, self.E.L.render(keys, active_group, composed=True)):
+                loose = False  # the field read after the move shows a space or nothing left of the word
         s = self._vctx(hwnd, ctx.kind, active_lang, ctx)
         self.vgroup = active_group
         if self.prev and self.prev["hwnd"] == hwnd and time.time() - self.prev["t"] < 60:
@@ -348,7 +372,7 @@ class Runner:
             n_back, out, orig, kids, switch_to, reason = len(typed), new, typed, [d["key_id"]], d["lang"], d["reason"]
         p = self.prev
         prev_ok = bool(p and p["hwnd"] == hwnd and p["boundary"] == W.VK_SPACE and time.time() - p["t"] < 30
-                       and ctx.kind not in LATIN_KINDS)
+                       and ctx.kind not in LATIN_KINDS and not p.get("loose"))
         if d["action"] == "rewrite" and prev_ok:
             r = self.E.recheck_previous(p["keys"], p["group"], d["lang"])
             if r:
@@ -359,7 +383,7 @@ class Runner:
                 prev_ok = False
         head, word = (out.rsplit(" ", 1) + [""])[:2] if " " in out else ("", out)
         pol = None
-        if ctx.kind == "prose" and lang and d.get("reason") != "exception" and word and \
+        if ctx.kind == "prose" and lang and d.get("reason") != "exception" and word and not loose and \
                 (self.cfg.get("fix_typos", True) or self.cfg.get("fix_yo", True) or self.cfg.get("fix_spaces", True)):
             opts = {"typos": self.cfg.get("fix_typos", True), "yo": self.cfg.get("fix_yo", True),
                     "spaces": self.cfg.get("fix_spaces", True)}
@@ -387,11 +411,11 @@ class Runner:
                 self._tail(0, out + bch)
             self.prev = {"keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk,
                          "lang": lang or ctx.sticky, "t": time.time(), "raw": typed, "shown": typed,
-                         "kid": d.get("key_id", "")}
+                         "kid": d.get("key_id", ""), "loose": loose}
             return False
 
         self.blocked_up.add(bvk)
-        self.jobs.put(("rewrite", hwnd, n_back, out, bvk, switch_to))
+        self.jobs.put(("rewrite", hwnd, n_back, out, bvk, switch_to, held))
         if switch_to:
             self.last_hkl = self.E.L.hkls.get(switch_to)
         self.E.learn(ctx, lang)
@@ -413,7 +437,7 @@ class Runner:
         self.prev = None if two else {
             "keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk, "lang": lang,
             "t": time.time(), "raw": new if d["action"] == "rewrite" else typed, "shown": shown,
-            "kid": kids[0]}
+            "kid": kids[0], "loose": loose}
         return True
 
     def undo(self):
@@ -532,6 +556,7 @@ class Runner:
                     s.moved = True
                     s.click_at = len(s.trace)
                 self.reset()
+                self.loose = time.time()
             return W.user32.CallNextHookEx(None, code, wparam, lparam)
 
         @W.WINEVENTPROC
@@ -560,6 +585,16 @@ def _mtime(path):
         return os.path.getmtime(path)
     except OSError:
         return 0
+
+
+def _at_word_start(before, typed):
+    """The text before the caret (read while the word was typed, so it may hold its first letters) shows
+    that the word starts after a space, punctuation or at the start of the field."""
+    for k in range(min(len(typed), len(before)), -1, -1):
+        if before.endswith(typed[:k]):
+            left = before[:len(before) - k]
+            return not left or not left[-1].isalnum()
+    return False
 
 
 def _hex(hkl):

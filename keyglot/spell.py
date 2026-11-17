@@ -135,7 +135,8 @@ class Speller:
             # extra letter: doubled or a neighbour of the letter next to it is the usual slip
             near = (i > 0 and (word[i - 1] == ch or ch in NEIGHBOURS[group].get(word[i - 1], ()))) or \
                    (i + 1 < n and (word[i + 1] == ch or ch in NEIGHBOURS[group].get(word[i + 1], ())))
-            put(word[:i] + word[i + 1:], 0.7 if near else 1.0, i)
+            if i or near:  # a stray first letter is a neighbour slip; "дописывает" is not "описывает"
+                put(word[:i] + word[i + 1:], 0.7 if near else 1.0, i)
             if i + 1 < n and word[i] != word[i + 1]:
                 put(word[:i] + word[i + 1] + ch + word[i + 2:], 0.7, i)
             for c in alpha:
@@ -327,7 +328,8 @@ class Speller:
             return None
         opts = []
         if len(prev) >= 2:
-            a, b = prev[:-1], prev[-1] + cur
+            # "хочуя я": the letter was typed twice, around the space — drop the stray one, not "хочу яя"
+            a, b = prev[:-1], cur if cur == prev[-1] else prev[-1] + cur
             if self._ok_part(a, lang) and self._ok_part(b, lang):
                 opts.append(((a, b), min(self.z(a, lang) or 5.0, self.z(b, lang))))
         if len(cur) >= 2:

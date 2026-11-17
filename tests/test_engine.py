@@ -35,6 +35,10 @@ PROSE = [
     ("ok", "lat", "ok"),
     ("hr", "lat", "hr"),
     ("люблю хлеб", "ru", "люблю хлеб"),
+    # 0.3.4: tokens without letters are never converted (':-)' became 'Ж-)', a lone '.' became 'ю')
+    ("ok :-)", "lat", "ok :-)"),
+    ("the end . next", "lat", "the end . next"),
+    ("one , two", "lat", "one , two"),
 ]
 
 
@@ -116,6 +120,9 @@ def test_wordlist_lookup(eng):
     ("в тексте имейла", "ru", "в тексте имейла"),
     ("мояработа это", "ru", "моя работа это"),
     ("этоправда", "ru", "это правда"),
+    # 0.3.4, seen in the log
+    ("сам дописывает текст", "ru", "сам дописывает текст"),   # a stray first letter only if it is a neighbour
+    ("не хочуя я спать", "ru", "не хочу я спать"),            # letter typed twice around the space, not "яя"
 ])
 def test_polish(eng, text, layout, want):
     assert simulate(eng, text, layout, polish={}) == want

@@ -195,3 +195,64 @@ def test_prune(tmp_path, monkeypatch):
         (tmp_path / f"{d}.jsonl").write_text("{}\n")
     assert IL.prune(14) == 1
     assert os.listdir(tmp_path) == [f"{new}.jsonl"]
+
+
+def keys(run, word):
+    for vk, shift, caps in run.r.E.L.keys_for(word, "lat"):
+        run.r.on_key(vk, True, False, 0)
+
+
+def jobs(run):
+    out = []
+    while not run.r.jobs.empty():
+        out.append(run.r.jobs.get())
+    return out
+
+
+def test_typo_fixed_without_caret_move(run):
+    run.typ("hello wrold")
+    assert [j[3] for j in jobs(run)] == ["world"]
+
+
+def test_no_typo_or_space_fix_after_caret_move(run):
+    # after a click or arrows the word may continue text left of the caret ("помо|жет" became "же")
+    run.typ("hello")
+    run.r.on_key(VK_LEFT, True, False, 0)
+    run.typ("wrold")
+    assert jobs(run) == []
+    run.typ("hellow orld")          # without a move the space is put back where it belongs
+    assert [j[3] for j in jobs(run)][-1] == "hello world"
+    run.r.on_key(VK_LEFT, True, False, 0)
+    run.typ("hellow orld")          # but not across a move: the first word is no anchor for the second
+    assert all(" " not in j[3] for j in jobs(run))
+    run.typ("wrold")                # the move is over: words after it are fixed again
+    assert [j[3] for j in jobs(run)] == ["world"]
+
+
+def test_word_start_after_move():
+    assert R._at_word_start("", "wrold")
+    assert R._at_word_start("Hello, w", "wrold")
+    assert R._at_word_start("one two ", "wrold")
+    assert not R._at_word_start("помож", "жет")
+    assert not R._at_word_start("помо", "жет")
+
+
+def test_ctrl_enter_fixes_last_word(run, monkeypatch):
+    VK_CONTROL, VK_LCONTROL = 0x11, 0xA2
+    run.typ("hello")
+    keys(run, "wrold")
+    monkeypatch.setattr(R.W, "key_down", lambda vk: vk in (VK_CONTROL, VK_LCONTROL))
+    assert run.r.on_key(VK_RETURN, True, False, 0) is True   # Enter held back until the word is fixed
+    (job,) = jobs(run)
+    _, hwnd, n_back, text, bvk, lang, held = job
+    assert (n_back, text, bvk, held) == (5, "world", VK_RETURN, (VK_LCONTROL,))  # Ctrl released for Backspace
+    e = run.lines()[-1]
+    assert e["end"] == "enter" and e["text"] == "hello world" and e["keys"].endswith("{→world}[^⏎]")
+
+
+def test_ctrl_enter_passes_when_nothing_to_fix(run, monkeypatch):
+    run.typ("hello")
+    keys(run, "world")
+    monkeypatch.setattr(R.W, "key_down", lambda vk: vk in (0x11, 0xA2))
+    assert run.r.on_key(VK_RETURN, True, False, 0) is False
+    assert jobs(run) == [] and run.lines()[-1]["text"] == "hello world"

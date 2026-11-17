@@ -11,6 +11,7 @@ LRESULT = ctypes.c_ssize_t
 VK_BACK, VK_TAB, VK_RETURN, VK_SHIFT, VK_CONTROL, VK_MENU = 0x08, 0x09, 0x0D, 0x10, 0x11, 0x12
 VK_PAUSE, VK_CAPITAL, VK_SPACE = 0x13, 0x14, 0x20
 VK_LWIN, VK_RWIN = 0x5B, 0x5C
+VK_LCONTROL, VK_RCONTROL = 0xA2, 0xA3
 WM_INPUTLANGCHANGEREQUEST = 0x0050
 
 
@@ -162,13 +163,19 @@ def _key_input(vk=0, scan=0, flags=0):
     return i
 
 
-def send_rewrite(n_back, text, boundary_vk=None):
-    """One atomic SendInput: n_back Backspaces, the text as Unicode, then the boundary key."""
+def send_rewrite(n_back, text, boundary_vk=None, held=()):
+    """One atomic SendInput: n_back Backspaces, the text as Unicode, then the boundary key.
+    held: modifier keys the user holds (Ctrl of Ctrl+Enter) — released for the Backspaces (Ctrl+Backspace would
+    erase whole words) and pressed again before the boundary key; the user's own key-up ends them."""
     seq = []
+    for vk in held:
+        seq.append(_key_input(vk, flags=2 | (1 if vk == VK_RCONTROL else 0)))
     for _ in range(n_back):
         seq += [_key_input(VK_BACK), _key_input(VK_BACK, flags=2)]
     for unit in _utf16_units(text):
         seq += [_key_input(scan=unit, flags=4), _key_input(scan=unit, flags=4 | 2)]
+    for vk in held:
+        seq.append(_key_input(vk, flags=1 if vk == VK_RCONTROL else 0))
     if boundary_vk:
         seq += [_key_input(boundary_vk), _key_input(boundary_vk, flags=2)]
     if seq:
