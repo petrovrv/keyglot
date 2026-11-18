@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6 — 2026-11-18
+
+- Fewer false space fixes: a word before the space that is already a word changes only into a common one
+  ("в брико" no longer becomes "вб рико"); a word with one letter missed is not split in two
+  ("голвы" no longer becomes "гол вы").
+
 ## 0.3.5 — 2026-11-18
 
 - **Shift+Backspace** converts the current or just typed word to the other layout (like Pause); pressed again it

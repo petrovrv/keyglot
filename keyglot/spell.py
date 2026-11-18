@@ -327,10 +327,21 @@ class Speller:
             return w in ONE_LETTER[lang]
         return self.z(w, lang) >= min_z
 
+    def _missing_letter(self, word, lang, min_z=3.5):
+        """A known word that is this one with one letter added (голвы -> головы)."""
+        letters = set("".join(_ROWS[LANG_GROUP[lang]]))
+        for i in range(1, len(word)):
+            for ch in letters:
+                if self.z(word[:i] + ch + word[i:], lang) >= min_z:
+                    return True
+        return False
+
     def split(self, word, lang):
         """Missing space: приветкак -> (привет, как)."""
         if len(word) < 5 or self.known_anywhere(word) or word.startswith(COMPOUND_HEADS):
             return None
+        if self._missing_letter(word, lang):
+            return None  # голвы is головы with a letter missed, not "гол вы"
         best = None
         for i in range(1, len(word) - 1):
             a, b = word[:i], word[i:]
@@ -361,7 +372,8 @@ class Speller:
                 opts.append(((a, b), min(self.z(a, lang) or 5.0, self.z(b, lang))))
         if len(cur) >= 2:
             a, b = prev + cur[0], cur[1:]
-            if self._ok_part(a, lang) and self._ok_part(b, lang):
+            # "в брико" is not "вб рико": a previous word that is already a word changes only into a common one
+            if self._ok_part(a, lang, 4.5 if p_ok else 3.0) and self._ok_part(b, lang):
                 opts.append(((a, b), min(self.z(a, lang), self.z(b, lang) or 5.0)))
         if not p_ok and not c_ok:
             j = prev + cur

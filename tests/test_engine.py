@@ -123,6 +123,9 @@ def test_wordlist_lookup(eng):
     # 0.3.4, seen in the log
     ("сам дописывает текст", "ru", "сам дописывает текст"),   # a stray first letter only if it is a neighbour
     ("не хочуя я спать", "ru", "не хочу я спать"),            # letter typed twice around the space, not "яя"
+    # 0.3.6, seen in the log
+    ("что там в брико продают", "ru", "что там в брико продают"),  # a word before the space stays, not "вб рико"
+    ("голвы под крышей", "ru", "голвы под крышей"),                # a missed letter (головы), not "гол вы"
 ])
 def test_polish(eng, text, layout, want):
     assert simulate(eng, text, layout, polish={}) == want
