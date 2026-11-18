@@ -12,6 +12,7 @@ from . import winapi as W
 from .context import ContextProvider, SKIP_EXE, TERMINAL_EXE, classify, FieldInfo
 from .engine import Ctx, LATIN_KINDS
 from .layouts import DIGIT_VKS, LANG_GROUP, WORD_VKS
+from .lexicon import split_core
 
 MODIFIER_VKS = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, W.VK_CAPITAL}
 SHIFT_VKS = (0x10, 0xA0, 0xA1)
@@ -48,6 +49,7 @@ class Runner:
         self.loose = 0               # when the caret moved (click, arrows, Ctrl+...): the next word may be a fragment
         self.last_down = None         # the previous key pressed (Shift+Backspace counts only right after Shift)
         self.cycle = None             # Shift/Alt+Backspace, Pause: the options of the last word and which one is shown
+        self.recent_fix = None        # the last fix, also after Enter: erased and typed back = rejected
 
     # ------------------------------------------------------------ utils ---
     @property
@@ -416,6 +418,13 @@ class Runner:
             else:
                 out = (head + " " if head else "") + pol["text"]
             reason = (reason + "; " if reason else "") + pol["reason"]
+        rf = self.recent_fix
+        if erased and pol and rf and rf["hwnd"] == hwnd and time.time() - rf["t"] < 60 and                 rf["orig"] == orig and rf["new"] == out and erased.strip() == out.strip():
+            # the fix was erased and the word typed again: the user means it as typed
+            for k in kids:
+                self.E.add_exception(k)
+            self._rejected(rf)
+            out = orig
         if out == orig:
             if s:
                 s.key(btok)
@@ -424,6 +433,8 @@ class Runner:
             else:
                 if s:
                     s.word(orig, out, d, bs, erased)
+                if erased:
+                    self._learn_retype(erased, orig, lang, hwnd)
                 self._tail(0, out + bch)
             self.prev = {"keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk,
                          "lang": lang or ctx.sticky, "t": time.time(), "raw": typed, "shown": typed,
@@ -446,9 +457,10 @@ class Runner:
             if switch_to:
                 self.vgroup = LANG_GROUP.get(switch_to, self.vgroup)
         self._tail(n_back - len(typed), out + bch)
-        self.last_corr = None if bvk == W.VK_RETURN else {
-            "orig": orig, "new": out, "bvk": bvk, "hwnd": hwnd, "lang": active_lang, "kids": kids,
-            "exe": ctx.exe, "kind": ctx.kind, "key": ctx.key}
+        corr = {"orig": orig, "new": out, "bvk": bvk, "hwnd": hwnd, "lang": active_lang, "kids": kids,
+                "exe": ctx.exe, "kind": ctx.kind, "key": ctx.key, "reason": reason, "plang": lang, "t": time.time()}
+        self.last_corr = None if bvk == W.VK_RETURN else corr
+        self.recent_fix = corr
         shown = out.rsplit(" ", 1)[-1]
         self.prev = None if two else {
             "keys": keys, "hwnd": hwnd, "group": d.get("group", active_group), "boundary": bvk, "lang": lang,
@@ -462,6 +474,7 @@ class Runner:
         self.jobs.put(("rewrite", c["hwnd"], len(c["new"]) + 1, c["orig"], c["bvk"], c["lang"]))
         for k in c["kids"]:
             self.E.add_exception(k)
+        self._rejected(c)
         self.dirty = True
         self.prev = None
         if not self.private(c["hwnd"]):
@@ -476,6 +489,42 @@ class Runner:
         if self.tail.endswith(c["new"] + bch):
             self.tail = self.tail[:-(len(c["new"]) + 1)] + c["orig"] + bch
         return True
+
+    # ------------------------------------------------ learned patterns ---
+    def _rejected(self, c):
+        """A typo or space fix the user turned back: learn a keep/ctx rule for the word cores."""
+        self.recent_fix = None
+        reason, lang = c.get("reason", ""), c.get("plang")
+        if not lang or not reason or self.private(c["hwnd"]):
+            return
+        words = [split_core(w)[1] for w in c["orig"].split()]
+        rule = None
+        if "space" in reason and len(words) == 2:
+            rule = self.E.P.reject_space(words[0], words[1], lang)
+        elif ("typo" in reason or "split" in reason or "rule" in reason) and len(words) == 1:
+            rule = self.E.P.reject(words[0], lang)
+        self.dirty = True
+        if rule:
+            self.event(event="pattern", exe=c["exe"], rule=rule, how="rejected")
+
+    def _learn_retype(self, erased, typed, lang, hwnd):
+        """A whole word erased before this one: its fix rejected, or a typo the user fixed by hand."""
+        e = erased.strip()
+        if not lang or not e or any(ch.isspace() for ch in e) or (self.tail and not self.tail[-1].isspace())                 or self.private(hwnd):
+            return
+        ec, tc = split_core(e)[1], split_core(typed)[1]
+        if not ec or not tc:
+            return
+        rf = self.recent_fix
+        if rf and rf["hwnd"] == hwnd and time.time() - rf["t"] < 60 and " " not in rf["new"].strip() and                 ec == split_core(rf["new"])[1] and tc.lower() == split_core(rf["orig"])[1].lower():
+            return self._rejected(rf)
+        S = self.E.S
+        if S.known_anywhere(ec.lower()) or S.z(tc.lower(), lang) < 2.5:
+            return
+        rule = self.E.P.retyped(ec, tc, lang)
+        self.dirty = True
+        if rule:
+            self.event(event="pattern", exe=self.exe, rule=rule, how="retyped")
 
     def hot_fix(self, kind, vk):
         """Shift+Backspace / Pause ("layout", "pause"): the current or just finished word in another layout;

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from .layouts import GROUP_LANGS, LANG_GROUP, TRAIL_PUNCT_VKS
 from .lexicon import LANGS, TECH_WORDS, split_core, valid_core
+from .patterns import Patterns
 from .spell import Speller, match_case
 
 # Field kinds where text is mostly Latin: only Cyrillic garbage -> Latin is corrected there.
@@ -37,6 +38,7 @@ class Engine:
         self.state.setdefault("ctx", {})
         self.exceptions = set(self.state.setdefault("exceptions", []))
         self.S = Speller(lm)
+        self.P = Patterns(self.state)
 
     # ------------------------------------------------------------ prior ---
     @staticmethod
@@ -255,7 +257,7 @@ class Engine:
         if opts.get("spaces", True) and prev_text and not pre and not name_like:
             ppre, pcore, ppost = split_core(prev_text)
             pair = f"{prev_kid} {kid}"
-            if pcore and pcore.isalpha() and not ppost and pair not in self.exceptions:
+            if pcore and pcore.isalpha() and not ppost and pair not in self.exceptions and                     not self.P.keeps(low, lang) and not self.P.keeps(pcore, lang) and                     not self.P.ctx(pcore, low, lang):
                 r = self.S.respace(pcore.lower(), low, lang)
                 if r:
                     if len(r) == 1:
@@ -263,7 +265,11 @@ class Engine:
                     else:
                         new_prev, words = ppre + match_case(pcore, r[0]), [r[1]]
                     reason.append("space " + " ".join(r))
-        if new_prev is None and not name_like:
+        rule = self.P.fix(low, lang) if new_prev is None and opts.get("typos", True) else None
+        if rule and rule != low and self.S.z(rule, lang) >= 1.0 and not self.P.keeps(low, lang):
+            words = [rule]
+            reason.append(f"rule {low}->{rule}")
+        elif new_prev is None and not name_like and not self.P.keeps(low, lang):
             typo = self.S.correct(low, group, {lang: 0.3}) if opts.get("typos", True) else None
             split = self.S.split(low, lang) if opts.get("spaces", True) else None
             if typo and (typo[3] <= 1.0 or not split):

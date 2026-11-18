@@ -23,6 +23,14 @@ def load(path):
     return out
 
 
+def load_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default=os.path.join(os.environ.get("LOCALAPPDATA", ""), "Keyglot"))
@@ -65,6 +73,7 @@ def main():
                    and not e.get("undo")],
         # the engine liked another reading but kept the word: a possible missed fix
         "near_miss": [e for e in flat if e.get("near")],
+        "patterns": [e for e in events if e.get("event") == "pattern"],
         "switch_missed": [e for e in events if e.get("event") == "switch_missed"],
         "errors": [e for e in events if e.get("event") == "error"],
         "by_app": collections.Counter(e.get("exe") for e in inputs + words).most_common(15),
@@ -107,6 +116,12 @@ def main():
     sect("Fixes", rep["fixes"], lambda e: f"{e.get('typed')!r} -> {e.get('out')!r} ({e.get('reason')}) {ctx(e)}")
     sect("Layout switch did not take", rep["switch_missed"],
          lambda e: f"{e.get('t')} {e.get('exe')} want {e.get('want')} got {e.get('got')}")
+    sect("Learned core rules turned on (keep / fix pair / ctx triplet)", rep["patterns"],
+         lambda e: f"{e.get('t')} {e.get('rule')} ({e.get('how')}) [{e.get('exe')}]")
+    state = load_json(os.path.join(a.dir, "state.json")).get("patterns") or {}
+    pending = [(kind, k, v) for kind, t in state.items() for k, v in t.items() if v.get("n", 0) == 1]
+    sect("Core rules seen once (on at the second time)", pending,
+         lambda e: f"{e[0]} {e[1]} ({e[2].get('word') or e[2].get('words', '')})")
     sect("Errors", rep["errors"], lambda e: f"{e.get('t')} {e.get('where')}: {e.get('error')}")
     return 0
 

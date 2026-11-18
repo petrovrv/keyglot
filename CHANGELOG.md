@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.7 — 2026-11-18
+
+- Rules over word cores (the word without its ending, so one rule covers every form): **keep** a core
+  (never typo-fixed or re-spaced), **fix** a pair of cores (typed -> meant), **ctx** a triplet of cores
+  (previous | this: no space fix between them). Shipped rules in data/patterns.json, learned ones in state.json.
+- Learned without a model: a typo fix undone with Backspace, or erased and typed again as it was, counts for
+  keep; an undone space fix counts for ctx; an unknown word erased and retyped as a close known word counts for
+  a fix pair. A rule turns on at the second time. A fix erased and retyped as it was is not repeated.
+- "скам" (скамом, скама, скамер …) is no longer "fixed" into "самом".
+- tools/log_digest.py lists the rules turned on and those seen once.
+
 ## 0.3.6 — 2026-11-18
 
 - Fewer false space fixes: a word before the space that is already a word changes only into a common one
