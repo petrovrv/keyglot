@@ -163,19 +163,30 @@ def _key_input(vk=0, scan=0, flags=0):
     return i
 
 
+VK_LSHIFT, VK_RSHIFT, VK_LMENU, VK_RMENU = 0xA0, 0xA1, 0xA4, 0xA5
+VK_MASK = 0xE8  # unassigned: a tap of it keeps a lone Alt press from opening the window menu
+_EXTENDED = (VK_RCONTROL, VK_RMENU)
+
+
 def send_rewrite(n_back, text, boundary_vk=None, held=()):
     """One atomic SendInput: n_back Backspaces, the text as Unicode, then the boundary key.
-    held: modifier keys the user holds (Ctrl of Ctrl+Enter) — released for the Backspaces (Ctrl+Backspace would
-    erase whole words) and pressed again before the boundary key; the user's own key-up ends them."""
+    held: modifier keys the user holds (Ctrl of Ctrl+Enter, Shift/Alt of Shift/Alt+Backspace) — released for the
+    Backspaces and the text (Ctrl+Backspace would erase whole words, Alt+letters are menu keys) and pressed again
+    at the end; the user's own key-up ends them. An Alt pressed alone opens the menu, so a masking key is tapped
+    while Alt is down."""
     seq = []
+    alt = any(vk in (VK_LMENU, VK_RMENU) for vk in held)
+    mask = [_key_input(VK_MASK), _key_input(VK_MASK, flags=2)] if alt else []
+    seq += mask
     for vk in held:
-        seq.append(_key_input(vk, flags=2 | (1 if vk == VK_RCONTROL else 0)))
+        seq.append(_key_input(vk, flags=2 | (1 if vk in _EXTENDED else 0)))
     for _ in range(n_back):
         seq += [_key_input(VK_BACK), _key_input(VK_BACK, flags=2)]
     for unit in _utf16_units(text):
         seq += [_key_input(scan=unit, flags=4), _key_input(scan=unit, flags=4 | 2)]
     for vk in held:
-        seq.append(_key_input(vk, flags=1 if vk == VK_RCONTROL else 0))
+        seq.append(_key_input(vk, flags=1 if vk in _EXTENDED else 0))
+    seq += mask
     if boundary_vk:
         seq += [_key_input(boundary_vk), _key_input(boundary_vk, flags=2)]
     if seq:

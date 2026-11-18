@@ -279,6 +279,33 @@ class Speller:
             return None  # the typed text looks like a normal word of its own (a rare form, a name)
         return c, lang, f"typo {word}->{c} cost {cost:.1f} z {zc:.1f} margin {margin:.1f}", cost
 
+    def suggest(self, word, group, prior=None, n=5):
+        """Alt+Backspace: the user says the word is wrong — ranked fixes without the auto-fix thresholds,
+        also for words that exist (зочет) and with two edits or a missing space. Lowercase input."""
+        langs = GROUP_LANGS[group]
+        prior = prior or {}
+        cands = {}
+
+        def put(c, s):
+            if c != word and s > cands.get(c, -99.0):
+                cands[c] = s
+        for lang in langs:
+            for c, cost in self.edits1(word, group).items():
+                zc = self.z(c, lang)
+                if zc:
+                    put(c, zc - 2.0 * cost + prior.get(lang, 0.0))
+            if len(word) >= 4:
+                for c, cost in self.edits2(word, lang, group, min_z=2.5, limit=2.6, budget=0.15).items():
+                    put(c, self.z(c, lang) - 2.0 * cost + prior.get(lang, 0.0))
+            for i in range(1, len(word)):
+                a, b = word[:i], word[i:]
+                if self._ok_part(a, lang, 3.0) and self._ok_part(b, lang, 3.0):
+                    put(a + " " + b, min(self.z(a, lang) or 5.0, self.z(b, lang) or 5.0) - 2.0)
+            y = self.yo(word) if lang == "ru" else None
+            if y:
+                put(y, self.z(y, lang))
+        return [c for c, _ in sorted(cands.items(), key=lambda kv: -kv[1])[:n]]
+
     # --------------------------------------------------------------- ё ---
     def yo(self, word):
         """еще -> ещё for Russian words whose ё-form is clearly the same word."""

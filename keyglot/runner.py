@@ -14,6 +14,8 @@ from .engine import Ctx, LATIN_KINDS
 from .layouts import DIGIT_VKS, LANG_GROUP, WORD_VKS
 
 MODIFIER_VKS = {0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, W.VK_CAPITAL}
+SHIFT_VKS = (0x10, 0xA0, 0xA1)
+HOT_TAG = {"layout": "[⇧⌫]", "typo": "[Alt+⌫]", "pause": "[Pause]"}
 
 
 class Runner:
@@ -44,6 +46,8 @@ class Runner:
         self.sess = None              # the current input of the detailed log (inputlog.Session)
         self.vgroup = None            # layout group the trace renders keys in
         self.loose = 0               # when the caret moved (click, arrows, Ctrl+...): the next word may be a fragment
+        self.last_down = None         # the previous key pressed (Shift+Backspace counts only right after Shift)
+        self.cycle = None             # Shift/Alt+Backspace, Pause: the options of the last word and which one is shown
 
     # ------------------------------------------------------------ utils ---
     @property
@@ -63,6 +67,7 @@ class Runner:
         self.keys = []
         self.nonword = False
         self.bs_word = 0
+        self.cycle = None
         if not keep_prev:
             self.prev = None
             self.last_corr = None
@@ -203,6 +208,7 @@ class Runner:
                 self.blocked_up.discard(vk)
                 return True
             return False
+        last, self.last_down = self.last_down, vk
         if vk in MODIFIER_VKS:
             return False
         shift = 1 if W.key_down(W.VK_SHIFT) else 0
@@ -212,10 +218,20 @@ class Runner:
                 self.flush("off")
                 self.set_enabled(not self.enabled)
             else:
-                self.manual_convert()
+                self.hot_fix("pause", vk)
             return True
         ctrl, alt = W.key_down(W.VK_CONTROL), W.key_down(W.VK_MENU)
         win = W.key_down(W.VK_LWIN) or W.key_down(W.VK_RWIN)
+        if vk == W.VK_BACK and self.enabled and not ctrl and not win and bool(shift) != bool(alt) and                 self.cfg.get("hotkeys", True):
+            # Shift+Backspace: the last word in the other layout; Alt+Backspace: the last word is a typo.
+            # Pressed again: the next option, then the word as it was. Shift+Backspace counts only right after
+            # Shift went down, so a Backspace while Shift is still held for capitals stays a Backspace.
+            kind = "typo" if alt else "layout"
+            c = self.cycle
+            if (alt or last in SHIFT_VKS or (c and c["kind"] == kind)) and self.hot_fix(kind, vk):
+                return True
+        if vk != W.VK_PAUSE:
+            self.cycle = None
         if self.enabled and ctrl and not alt and not win and vk == W.VK_RETURN and self.keys and \
                 self.cfg.get("correct_on_enter", True) and W.user32.GetForegroundWindow() == self.hwnd and \
                 self.exe not in SKIP_EXE and self.cfg["rules"].get(self.exe) != "off":
@@ -461,43 +477,57 @@ class Runner:
             self.tail = self.tail[:-(len(c["new"]) + 1)] + c["orig"] + bch
         return True
 
-    def manual_convert(self):
-        """Pause: convert the current (or just finished) word to the best other layout."""
-        hwnd = self.hwnd or W.user32.GetForegroundWindow()
-        ag = LANG_GROUP.get(W.hkl_lang(W.window_hkl(hwnd)))
-        if not ag:
-            return
-        if self.keys:
-            keys, tail, bvk = self.keys, 0, None
-        elif self.prev and self.prev["hwnd"] == hwnd:
-            keys, tail, bvk = self.prev["keys"], 1, self.prev["boundary"]
-            ag = self.prev["group"] or ag
+    def hot_fix(self, kind, vk):
+        """Shift+Backspace / Pause ("layout", "pause"): the current or just finished word in another layout;
+        Alt+Backspace ("typo"): the word with a typo fixed. Each press shows the next option, the last one is the
+        word as it was. Returns True when the key was used."""
+        hwnd = W.user32.GetForegroundWindow()
+        if hwnd != self.hwnd or self.exe in SKIP_EXE or self.cfg["rules"].get(self.exe) == "off":
+            return False
+        c = self.cycle
+        same = c and c["hwnd"] == hwnd and (c["kind"] == kind or {c["kind"], kind} == {"layout", "pause"})
+        if same:
+            c["i"] = (c["i"] + 1) % len(c["opts"])
         else:
-            return
-        typed = self.E.L.render(keys, ag, composed=True)
-        best = None
-        for g, lang, text, core, s, known in self.E.candidates(keys):
-            if g != ag and (best is None or s > best[1]):
-                best = (text, s, lang)
-        if not best:
-            return
-        self.jobs.put(("rewrite", hwnd, len(typed) + tail, best[0], bvk if tail else None, best[2]))
+            ag = LANG_GROUP.get(W.hkl_lang(W.window_hkl(hwnd)))
+            p = self.prev
+            if self.keys and ag:
+                keys, bvk, group, lang = self.keys, None, ag, None
+                shown = self.E.L.render(keys, ag, composed=True)
+            elif p and p["hwnd"] == hwnd and p["boundary"] == W.VK_SPACE and time.time() - p["t"] < 120:
+                keys, bvk, group, lang, shown = p["keys"], W.VK_SPACE, p["group"] or ag, p["lang"], p["shown"]
+            else:
+                return False
+            cur_lang = lang or W.hkl_lang(W.window_hkl(hwnd))
+            if kind == "typo":
+                g = LANG_GROUP.get(lang, group)
+                opts = [(t, None) for t in self.E.typo_options(shown, g, lang)]
+            else:
+                opts = [(t, l) for t, l in self.E.layout_options(keys, group) if t != shown]
+            self.blocked_up.add(vk)
+            if not opts:
+                self.vkey(hwnd, HOT_TAG[kind] + "{}")
+                return True  # nothing to offer: still swallowed, Alt+Backspace would be Undo in Office
+            back = cur_lang if kind != "typo" and LANG_GROUP.get(cur_lang) != LANG_GROUP.get(opts[0][1]) else None
+            c = self.cycle = {"kind": kind, "hwnd": hwnd, "opts": [(shown, back)] + opts, "i": 1, "bvk": bvk,
+                              "cur": shown, "in_tail": bvk is not None}
+            self.keys, self.prev, self.last_corr = [], None, None
+        self.blocked_up.add(vk)
+        new, lang = c["opts"][c["i"]]
+        cur, bvk = c["cur"], c["bvk"]
+        held = tuple(v for v in (W.VK_LSHIFT, W.VK_RSHIFT, W.VK_LMENU, W.VK_RMENU) if W.key_down(v))
+        self.jobs.put(("rewrite", hwnd, len(cur) + (1 if bvk else 0), new, bvk, lang, held))
         if not self.private(hwnd):
-            self.event(event="manual", exe=self.exe, frm=typed, to=best[0])
-        bch = "\n" if bvk == W.VK_RETURN else " "
-        s = self.vkey(hwnd, "[Pause]{" + typed + "→" + best[0] + "}")
+            self.event(event="manual", how=kind, exe=self.exe, frm=cur, to=new)
+        s = self.vkey(hwnd, HOT_TAG[kind] + "{" + cur + "→" + new + "}")
         if s:
             s.n["manual"] += 1
-            self.vgroup = LANG_GROUP.get(best[2], self.vgroup)
-        if not tail:
-            self._tail(0, best[0])  # the word in progress, now converted
-        else:
-            if self.tail.endswith(typed + bch):
-                self.tail = self.tail[:-(len(typed) + 1)] + best[0] + bch
-            if s and s.text.endswith(typed + bch):
-                s.text = s.text[:-(len(typed) + 1)] + best[0] + bch
-        self.keys = []
-        self.prev = None
+            if lang:
+                self.vgroup = LANG_GROUP.get(lang, self.vgroup)
+        bch = " " if bvk else ""
+        self._tail(len(cur) + len(bch) if c["in_tail"] else 0, new + bch)
+        c["in_tail"], c["cur"] = True, new
+        return True
 
     def on_foreground(self, hwnd):
         if not self.cfg.get("preswitch") or not self.enabled or not hwnd:

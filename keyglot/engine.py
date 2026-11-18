@@ -98,6 +98,27 @@ class Engine:
                     out.append((group, lang, text, core, s, known))
         return out
 
+    def layout_options(self, keys, active_group):
+        """Shift+Backspace / Pause: the word in the other layouts, best first [(text, lang)]."""
+        best = {}
+        for g, lang, text, core, s, known in self.candidates(keys):
+            if g != active_group and (g not in best or s > best[g][1]):
+                best[g] = (text, s, lang)
+        out, seen = [], {self.L.render(keys, active_group, composed=True)}
+        for text, s, lang in sorted(best.values(), key=lambda v: -v[1]):
+            if text not in seen:
+                seen.add(text)
+                out.append((text, lang))
+        return out
+
+    def typo_options(self, text, group, lang=None):
+        """Alt+Backspace: fixes of a word the user marked as a typo, best first; case and punctuation kept."""
+        pre, core, post = split_core(text)
+        if not core or not core.isalpha() or group not in GROUP_LANGS:
+            return []
+        prior = {lang: 0.5} if lang else None
+        return [pre + match_case(core, c) + post for c in self.S.suggest(core.lower(), group, prior)]
+
     def key_id(self, keys):
         return self.L.render(keys, "lat").lower() if "lat" in self.L.tables else ""
 

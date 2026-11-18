@@ -40,7 +40,9 @@ Just type. The tray icon shows the language of the active window.
 | Key | Action |
 |---|---|
 | **Backspace** right after a correction | Undo it and remember the word |
-| **Pause** | Convert the last word to the other layout |
+| **Shift+Backspace** | Convert the last word to the other layout (press again: next option, then back) |
+| **Alt+Backspace** | Treat the last word as a typo and fix it (press again: next suggestion, then back) |
+| **Pause** | Same as Shift+Backspace |
 | **Shift+Pause** | Turn Keyglot off/on |
 
 Settings (tray icon → Settings): correction on Enter, typos, ё, spaces, layout pre-switch per window, per-program mode

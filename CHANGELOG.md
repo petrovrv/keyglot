@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.5 — 2026-11-18
+
+- **Shift+Backspace** converts the current or just typed word to the other layout (like Pause); pressed again it
+  shows the next layout, then the word as it was. It also undoes a wrong automatic switch. It counts only right
+  after Shift goes down, so Backspace while Shift is still held for capitals stays a plain Backspace.
+- **Alt+Backspace** treats the word as a typo and fixes it without the auto-fix thresholds (also two-letter slips,
+  a missing space, ё, words that exist); pressed again: the next suggestion, then the word as it was.
+  With no word to fix the key goes through (Undo in Office still works there).
+- Shift/Alt held by the user are released for the rewrite; a masking key keeps Alt from opening the window menu.
+- Option `"hotkeys": false` in config.json turns both off.
+
 ## 0.3.4 — 2026-11-17
 
 - Ctrl+Enter (send in CO Desktop, WhatsApp Web …) now fixes the last word like Enter does. Keyglot holds the

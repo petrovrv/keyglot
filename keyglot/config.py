@@ -18,6 +18,7 @@ PENDING_FILE = os.path.join(APP_DIR, "pending.json")
 DEFAULTS = {
     "enabled": True,
     "correct_on_enter": True,
+    "hotkeys": True,              # Shift+Backspace: other layout, Alt+Backspace: typo fix
     "preswitch": True,
     "fix_typos": True,          # typos in words already in the right layout
     "fix_yo": True,             # еще -> ещё
