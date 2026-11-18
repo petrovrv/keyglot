@@ -6,17 +6,13 @@ all forms of a word. Three kinds of rules:
   fix   a pair of cores:       typed core -> meant core (зоч -> хоч: зочет -> хочет, зочу -> хочу)
   ctx   a triplet of cores:    previous core | this core: no space fix between them (в | брик)
 
-Shipped rules live in data/patterns.json (always on). Learned ones live in state["patterns"] with a
+Shipped rules live in SHIPPED below (always on). Learned ones live in state["patterns"] with a
 counter and turn on at LEARN_N observations:
   - a typo/split fix undone (Backspace) or erased and the original retyped -> keep
   - a space fix undone or erased and retyped                              -> ctx
   - an unknown word erased and retyped as a known word close to it        -> fix
 """
-import json
-import os
 import time
-
-from .lexicon import data_dir
 
 LEARN_N = 2          # observations before a learned rule is used
 MAX_RULES = 3000
@@ -57,12 +53,12 @@ def distance(a, b, limit=3):
     return min(prev[-1], limit)
 
 
-def _load_shipped():
-    try:
-        with open(os.path.join(data_dir(), "patterns.json"), encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+# lang -> cores; fix: lang -> {typed core: meant core}; ctx: lang -> ["prev core|core"]
+SHIPPED = {
+    "keep": {"ru": ["скам"]},
+    "fix": {},
+    "ctx": {},
+}
 
 
 class Patterns:
@@ -71,7 +67,7 @@ class Patterns:
         self.learned = self.state.setdefault("patterns", {})
         for k in ("keep", "fix", "ctx"):
             self.learned.setdefault(k, {})
-        sh = _load_shipped() if shipped is None else shipped
+        sh = SHIPPED if shipped is None else shipped
         self.keep_on = {f"{lang}:{c}" for lang, cs in (sh.get("keep") or {}).items() for c in cs}
         self.fix_on = {}
         for lang, pairs in (sh.get("fix") or {}).items():

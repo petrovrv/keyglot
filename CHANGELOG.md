@@ -1,10 +1,15 @@
 # Changelog
 
+## 0.3.8 — 2026-11-18
+
+- The shipped core rules (скам) are inside the program: 0.3.7 looked for them in a data file the build
+  does not include.
+
 ## 0.3.7 — 2026-11-18
 
 - Rules over word cores (the word without its ending, so one rule covers every form): **keep** a core
   (never typo-fixed or re-spaced), **fix** a pair of cores (typed -> meant), **ctx** a triplet of cores
-  (previous | this: no space fix between them). Shipped rules in data/patterns.json, learned ones in state.json.
+  (previous | this: no space fix between them). Shipped rules in the program, learned ones in state.json.
 - Learned without a model: a typo fix undone with Backspace, or erased and typed again as it was, counts for
   keep; an undone space fix counts for ctx; an unknown word erased and retyped as a close known word counts for
   a fix pair. A rule turns on at the second time. A fix erased and retyped as it was is not repeated.
