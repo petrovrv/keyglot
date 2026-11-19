@@ -33,6 +33,12 @@ def test_shipped_keep_rule_covers_all_forms(eng):
         assert simulate(eng, f"это был {w}", "ru", Ctx(), polish={}) == f"это был {w}"
 
 
+def test_shipped_keep_rule_for_a_company_name(eng):
+    # 0.3.9: Thorizon (a company) was "fixed" to Horizon
+    for w in ("Thorizon", "Thorizon,", "thorizon."):
+        assert simulate(eng, f"about {w}", "lat", Ctx(), polish={}) == f"about {w}"
+
+
 def test_keep_learned_after_two_rejections(lm):
     p = Patterns({}, shipped={})
     assert p.reject("тесом", "ru") is None and not p.keeps("тесами", "ru")

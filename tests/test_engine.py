@@ -39,6 +39,13 @@ PROSE = [
     ("ok :-)", "lat", "ok :-)"),
     ("the end . next", "lat", "the end . next"),
     ("one , two", "lat", "one , two"),
+    # 0.3.9: a last б/ю that is a neighbour slip of ь makes a word, not "word,"
+    ("поставб для", "ru", "поставь для"),
+    ("делатб это", "ru", "делать это"),
+    ("Поставб", "ru", "Поставь"),
+    ("такб", "ru", "так,"),
+    ("делб", "ru", "дел,"),
+    ("хлеб", "ru", "хлеб"),
 ]
 
 

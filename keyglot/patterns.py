@@ -55,7 +55,7 @@ def distance(a, b, limit=3):
 
 # lang -> cores; fix: lang -> {typed core: meant core}; ctx: lang -> ["prev core|core"]
 SHIPPED = {
-    "keep": {"ru": ["скам"]},
+    "keep": {"ru": ["скам"], "en": ["thorizon"]},
     "fix": {},
     "ctx": {},
 }

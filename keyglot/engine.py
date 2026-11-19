@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from .layouts import GROUP_LANGS, LANG_GROUP, TRAIL_PUNCT_VKS
 from .lexicon import LANGS, TECH_WORDS, split_core, valid_core
 from .patterns import Patterns
-from .spell import Speller, match_case
+from .spell import NEIGHBOURS, Speller, match_case
 
 # Field kinds where text is mostly Latin: only Cyrillic garbage -> Latin is corrected there.
 LATIN_KINDS = {"terminal", "code", "path", "address"}
@@ -89,6 +89,10 @@ class Engine:
             if len(variants) > 1 and valid_core(full_core, group) and \
                     max(self.lm.known(full_core, l) for l in GROUP_LANGS[group]) >= 2.0:
                 variants = variants[:1]  # "гараж" is a word: the last key is a letter, not ';'
+            elif len(variants) > 1 and self._last_key_slip(keys):
+                # "поставб" is "поставь" with a neighbour slip, not "постав,"
+                slip = self._slip_word(keys, group)
+                variants = variants[:1] + ([slip] if slip else [])
             for k, text in enumerate(variants):
                 _, core, _ = split_core(text)
                 if not valid_core(core, group):
@@ -99,6 +103,30 @@ class Engine:
                         s -= 1.0  # cost of the punctuation hypothesis
                     out.append((group, lang, text, core, s, known))
         return out
+
+    def _slip_word(self, keys, group):
+        """The word with its last letter (a punctuation key in Latin) replaced by the most common neighbour
+        that makes a word more common than the word before it, or None."""
+        text = self.L.render(keys, group)
+        full_core = split_core(text)[1].lower()
+        if len(full_core) < 4 or not full_core.isalpha() or not text.endswith(split_core(text)[1]):
+            return None
+        stripped = split_core(self.L.render(keys[:-1], group))[1].lower()
+        langs = GROUP_LANGS[group]
+        cyr = [l for g, ls in GROUP_LANGS.items() if g != "lat" for l in ls]
+        best_k = max(max(self.lm.known(stripped, l) for l in langs) if stripped else 0.0, 2.0)
+        # "дел," stays: "дель" is less common than "дел" in another Cyrillic language
+        best_k = max(best_k, max(self.lm.known(stripped, l) for l in cyr) - 0.5 if stripped else 0.0)
+        best = None
+        for ch in sorted(NEIGHBOURS.get(group, {}).get(full_core[-1], ())):
+            k = max(self.lm.known(full_core[:-1] + ch, l) for l in langs)
+            if k > best_k:
+                best, best_k = text[:-1] + match_case(text[-1], ch), k
+        return best
+
+    def _last_key_slip(self, keys):
+        """True if in any Cyrillic layout the last key is a neighbour slip of a letter, not punctuation."""
+        return any(g != "lat" and self._slip_word(keys, g) for g in self.L.tables)
 
     def layout_options(self, keys, active_group):
         """Shift+Backspace / Pause: the word in the other layouts, best first [(text, lang)]."""

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.9 — 2026-11-19
+
+- A last б (or ю) that is a slip of the neighbour key makes a word: "поставб" -> "поставь", "делатб" -> "делать",
+  not "постав," (the comma reading stays when the word before it is more common: "так,", "дел,").
+- Thorizon (a company name) is kept: it was "fixed" to Horizon.
+
 ## 0.3.8 — 2026-11-18
 
 - The shipped core rules (скам) are inside the program: 0.3.7 looked for them in a data file the build
