@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.10 — 2026-11-20
+
+- Keep valid Russian words that were incorrectly split: колко, обучишься, неумеренно,
+  призакрыл, приоткрытие, сопоставь, приоткрытыми. Shipped core rules also cover inflections.
+- Add seven regression cases for false space insertion, including punctuation.
+
 ## 0.3.9 — 2026-11-19
 
 - A last б (or ю) that is a slip of the neighbour key makes a word: "поставб" -> "поставь", "делатб" -> "делать",

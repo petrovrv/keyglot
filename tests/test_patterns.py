@@ -99,3 +99,11 @@ def test_word_erased_and_retyped_by_hand_counts_for_fix_pair(lm, monkeypatch, tm
     r.typ("working")
     (k,) = e.state["patterns"]["fix"]
     assert k.startswith("en:wrko") and e.state["patterns"]["fix"][k]["n"] == 1
+
+
+@pytest.mark.parametrize("text", [
+    "колко,", "обучишься", "неумеренно", "призакрыл",
+    '"приоткрытие"', "сопоставь", "приоткрытыми",
+])
+def test_review_nov19_words_are_not_split(eng, text):
+    assert simulate(eng, text, "ru", Ctx(), polish={}) == text
