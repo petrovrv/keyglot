@@ -107,3 +107,8 @@ def test_word_erased_and_retyped_by_hand_counts_for_fix_pair(lm, monkeypatch, tm
 ])
 def test_review_nov19_words_are_not_split(eng, text):
     assert simulate(eng, text, "ru", Ctx(), polish={}) == text
+
+
+@pytest.mark.parametrize("text", ["Sonoff", "Sonoff,", "sonoff."])
+def test_review_nov20_device_brand_is_not_split(eng, text):
+    assert simulate(eng, text, "lat", Ctx(), polish={}) == text

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.11 — 2026-11-21
+
+- Preserve the Sonoff device brand instead of splitting it into "Son off".
+- Add regression coverage for capitalization and trailing punctuation.
+
 ## 0.3.10 — 2026-11-20
 
 - Keep valid Russian words that were incorrectly split: колко, обучишься, неумеренно,

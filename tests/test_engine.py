@@ -71,6 +71,14 @@ def test_skip_field(eng):
     assert simulate(eng, "ghbdtn", "lat", Ctx(kind="skip")) == "ghbdtn"
 
 
+@pytest.mark.parametrize("typed,physical", [("ПЗЕ,", "GPT?"), ("ГЫИ...", "USB///")])
+def test_cyrillic_punctuation_physical_mapping(typed, physical):
+    # Characterize the physical mapping; preserving intended punctuation is a
+    # separate policy decision and must not change the layout tables.
+    layouts = Layouts(static=True)
+    assert layouts.render(layouts.keys_for(typed, "ru"), "lat") == physical
+
+
 def test_document_language_tips_short_word(eng):
     # "lf" is ambiguous alone; inside a Russian conversation it is "да"
     alone = simulate(eng, "lf", "lat")
