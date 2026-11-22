@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.12 — 2026-11-22
+
+- Preserve the DeepSeek model brand instead of splitting it into "Deep seek".
+- Add regression coverage for lowercase, capitalization and trailing punctuation.
+
 ## 0.3.11 — 2026-11-21
 
 - Preserve the Sonoff device brand instead of splitting it into "Son off".

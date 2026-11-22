@@ -112,3 +112,8 @@ def test_review_nov19_words_are_not_split(eng, text):
 @pytest.mark.parametrize("text", ["Sonoff", "Sonoff,", "sonoff."])
 def test_review_nov20_device_brand_is_not_split(eng, text):
     assert simulate(eng, text, "lat", Ctx(), polish={}) == text
+
+
+@pytest.mark.parametrize("text", ["deepseek", "Deepseek", "DeepSeek,"])
+def test_review_nov21_model_brand_is_not_split(eng, text):
+    assert simulate(eng, text, "lat", Ctx(), polish={}) == text
