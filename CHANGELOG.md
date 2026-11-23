@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.13 — 2026-11-23
+
+- Preserve the Vitaz name instead of removing its final letter.
+- Add regression coverage for lowercase, capitalization and trailing punctuation.
+
 ## 0.3.12 — 2026-11-22
 
 - Preserve the DeepSeek model brand instead of splitting it into "Deep seek".

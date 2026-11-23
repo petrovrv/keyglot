@@ -117,3 +117,8 @@ def test_review_nov20_device_brand_is_not_split(eng, text):
 @pytest.mark.parametrize("text", ["deepseek", "Deepseek", "DeepSeek,"])
 def test_review_nov21_model_brand_is_not_split(eng, text):
     assert simulate(eng, text, "lat", Ctx(), polish={}) == text
+
+
+@pytest.mark.parametrize("text", ["vitaz", "Vitaz", "Vitaz,"])
+def test_healthcare_name_keeps_final_letter(eng, text):
+    assert simulate(eng, text, "lat", Ctx(), polish={}) == text
