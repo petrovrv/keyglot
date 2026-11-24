@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.14 — 2026-11-24
+
+- Preserve the Russian imperative разведай and its plural form instead of inserting a space.
+- Add regression coverage for capitalization, punctuation and the plural imperative.
+
 ## 0.3.13 — 2026-11-23
 
 - Preserve the Vitaz name instead of removing its final letter.
