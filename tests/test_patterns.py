@@ -127,3 +127,8 @@ def test_healthcare_name_keeps_final_letter(eng, text):
 @pytest.mark.parametrize("text", ["разведай", "Разведай.", "разведайте"])
 def test_reconnaissance_imperative_is_not_split(eng, text):
     assert simulate(eng, text, "ru", Ctx(), polish={}) == text
+
+
+@pytest.mark.parametrize("text", ["подпапка", "Подпапка", "подпапки,"])
+def test_subfolder_word_is_not_split(eng, text):
+    assert simulate(eng, text, "ru", Ctx(), polish={}) == text

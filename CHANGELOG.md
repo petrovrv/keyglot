@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.15 — 2026-11-25
+
+- Preserve the Russian word подпапка (subfolder) instead of splitting it into «под папка».
+- Add regression coverage for lowercase, capitalization and inflected form.
+
 ## 0.3.14 — 2026-11-24
 
 - Preserve the Russian imperative разведай and its plural form instead of inserting a space.
