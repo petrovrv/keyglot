@@ -141,6 +141,9 @@ def test_wordlist_lookup(eng):
     # 0.3.6, seen in the log
     ("что там в брико продают", "ru", "что там в брико продают"),  # a word before the space stays, not "вб рико"
     ("голвы под крышей", "ru", "голвы под крышей"),                # a missed letter (головы), not "гол вы"
+    # 0.3.16, seen in the log
+    ("тут еше есть", "ru", "тут ещё есть"),         # ш for щ: ещё, not the nonsense "ешё"
+    ("Еше раз", "ru", "Ещё раз"),
 ])
 def test_polish(eng, text, layout, want):
     assert simulate(eng, text, layout, polish={}) == want

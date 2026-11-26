@@ -28,6 +28,9 @@ YO_AMBIGUOUS = set("""
 даем узнает тек тем чем лет
 """.split())
 
+# ш next to щ: a typo of ещё that the word list also knows as a word, so it is never "ешё".
+YO_TYPO = {"еше": "ещё"}
+
 COST_FIRST = 0.6     # extra cost of an edit at the first letter (people rarely miss it)
 
 # Endings used to recognise inflected forms that are missing from the word list.
@@ -309,6 +312,8 @@ class Speller:
     # --------------------------------------------------------------- ё ---
     def yo(self, word):
         """еще -> ещё for Russian words whose ё-form is clearly the same word."""
+        if word in YO_TYPO:
+            return YO_TYPO[word]
         if "е" not in word or "ё" in word or word in YO_AMBIGUOUS:
             return None
         z0 = self.z(word, "ru")

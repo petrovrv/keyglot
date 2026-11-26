@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.16 — 2026-11-26
+
+- Fix the Russian typo «еше» (ш for щ): it is now corrected to «ещё», not to the nonsense «ешё».
+- Add regression coverage for lowercase and capitalized forms.
+
 ## 0.3.15 — 2026-11-25
 
 - Preserve the Russian word подпапка (subfolder) instead of splitting it into «под папка».
