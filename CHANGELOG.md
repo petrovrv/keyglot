@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.17 — 2026-11-28
+
+- Stop splitting the real Russian words докинул, привидится and сверь (e.g. «сверь» -> «с верь»).
+- Add regression coverage for several forms of each.
+
 ## 0.3.16 — 2026-11-26
 
 - Fix the Russian typo «еше» (ш for щ): it is now corrected to «ещё», not to the nonsense «ешё».
